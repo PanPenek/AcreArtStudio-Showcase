@@ -1,0 +1,33 @@
+{
+  "name": "ailabor-showcase",
+  "productName": "AiLabor Art Studio",
+  "version": "3.1.0",
+  "description": "AI Labor Automation: an AI art creation studio. Write prompts, generate images, AI quality check, review, publish.",
+  "main": "src/main/main.js",
+  "author": "PanPenek",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "start": "electron .",
+    "test": "node tools/test.mjs",
+    "start:debug": "electron . --remote-debugging-port=9335",
+    "setup": "node tools/setup.mjs"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0"
+  },
+  "allowScripts": {
+    "electron": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PanPenek/AiLaborAutomation-Showcase"
+  },
+  "keywords": [
+    "electron",
+    "ai-art",
+    "comfyui",
+    "llm",
+    "automation",
+    "desktop-app"
+  ]
+}

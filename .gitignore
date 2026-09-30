@@ -1,0 +1,17 @@
+node_modules/
+library/
+*.log
+*.json.bak
+settings.json
+library.json
+queue.json
+stats.json
+overseer.json
+playbook.json
+.ala-review.json
+.env
+Thumbs.db
+.DS_Store
+comfyui/
+start_comfyui.bat
+*.part

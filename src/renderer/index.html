@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<!-- img-src includes https: so the Statistics tab can show DeviantArt's own thumbnails —
+     without it every thumb the sync brings back was silently blocked by CSP. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' ala: data: blob: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ala:;" />
+<title>AiLaborAutomation</title>
+<link rel="stylesheet" href="styles.css" />
+<!-- Before the stylesheet takes effect on <body>: sets data-theme from a
+     localStorage mirror so the window never flashes the other palette. -->
+<script src="theme.js"></script>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <img class="brand-mark" src="../assets/icon-64.png" alt="" width="28" height="28" />
+      <div>
+        <div class="brand-name">AiLabor</div>
+        <div class="brand-sub">Automation</div>
+      </div>
+    </div>
+    <nav id="nav">
+      <button class="nav-btn active" data-tab="dashboard"><span class="nav-ico">▣</span>Dashboard</button>
+      <!-- Placed here by request, directly under the Dashboard. It does NOT take Ctrl+2:
+           see NUM_TABS in app.js — the number keys are pinned to the historical order so
+           that adding a tab here can never move Review off Ctrl+4. Ctrl+Shift+O instead. -->
+      <button class="nav-btn" data-tab="overseer"><span class="nav-ico">☰</span>Overseer<span class="nav-badge" id="badge-overseer" hidden title="Cards the Overseer made that are still waiting in Review — not unread messages">0</span></button>
+            <button class="nav-btn" data-tab="promptlab"><span class="nav-ico">✧</span>Prompt Lab</button>
+      <button class="nav-btn" data-tab="review"><span class="nav-ico">◉</span>Review<span class="nav-badge" id="badge-review" hidden>0</span></button>
+      <button class="nav-btn" data-tab="drafts"><span class="nav-ico">⇪</span>Drafts<span class="nav-badge" id="badge-drafts" hidden>0</span></button>
+      <button class="nav-btn" data-tab="stats"><span class="nav-ico">▤</span>Statistics</button>
+      <!-- New tabs go AFTER Statistics, never before Review. Ctrl+1…9 is positional, and
+           Review being Ctrl+4 is muscle memory worth more than alphabetical tidiness. -->
+      <button class="nav-btn" data-tab="comics"><span class="nav-ico">▥</span>Comics</button>
+      <button class="nav-btn" data-tab="continuations"><span class="nav-ico">↻</span>Continuations<span class="nav-badge" id="badge-cont" hidden>0</span></button>
+      <button class="nav-btn" data-tab="perchance"><span class="nav-ico">◈</span>Perchance</button>
+      <button class="nav-btn" data-tab="upscaler"><span class="nav-ico">⤢</span>Upscaler<span class="nav-badge" id="badge-upscale" hidden>0</span></button>
+      <button class="nav-btn" data-tab="deviantart"><span class="nav-ico">✦</span>DeviantArt</button>
+      <button class="nav-btn px-only" data-tab="pixiv"><span class="nav-ico">✿</span>Pixiv</button>
+      <button class="nav-btn" data-tab="patreon"><span class="nav-ico">◔</span>Patreon<span class="nav-badge" id="badge-patreon" hidden>0</span></button>
+      <button class="nav-btn" data-tab="settings"><span class="nav-ico">⚙</span>Settings</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div id="side-health" class="side-health"></div>
+      <div class="worker-pill" id="worker-pill"><span class="dot"></span><span id="worker-pill-text">Worker idle</span></div>
+    </div>
+  </aside>
+
+  <main id="content">
+    <!-- DASHBOARD -->
+    <section class="tab-pane active" id="pane-dashboard">
+      <header class="pane-head"><h1>Dashboard</h1><p class="pane-sub">What is running, what each job is using, and whether it works.</p></header>
+
+      <!-- Status first. Every "is it broken or is it my settings" question is answered here. -->
+      <div class="panel" id="panel-health">
+        <div class="panel-head"><h2>Status <span class="hint" id="health-age"></span></h2>
+          <div class="btn-row">
+            <button class="btn small" id="btn-health-refresh">Re-check</button>
+            <button class="btn small" id="btn-health-testall">Test every engine</button>
+          </div>
+        </div>
+        <div id="health-rows" class="hz-list"></div>
+      </div>
+
+      <!-- Where the work is sitting right now. -->
+      <div class="panel">
+        <div class="panel-head"><h2>Work in progress</h2>
+          <div class="btn-row"><button class="btn ghost small" id="btn-flow-review">Open Review →</button></div>
+        </div>
+        <div id="flow-strip" class="flow-strip"></div>
+      </div>
+
+      <div class="card-row" id="dash-cards">
+        <div class="stat-card"><div class="stat-label">Images generated</div><div class="stat-value" id="dash-gen">0</div><div class="stat-hint">lifetime</div></div>
+        <div class="stat-card"><div class="stat-label">QC pass rate</div><div class="stat-value" id="dash-pass">—</div><div class="stat-hint" id="dash-pass-hint">—</div></div>
+        <div class="stat-card"><div class="stat-label">Drafts uploaded</div><div class="stat-value" id="dash-drafts">0</div><div class="stat-hint">in Sta.sh</div></div>
+      </div>
+      <div class="dash-grid">
+        <div class="dash-col">
+        <div class="panel">
+          <div class="panel-head"><h2>Worker</h2>
+            <div class="btn-row">
+              <button class="btn primary" id="btn-worker-start">Start</button>
+              <button class="btn" id="btn-worker-pause">Pause</button>
+            </div>
+          </div>
+          <div id="worker-status" class="worker-status">Idle. Queue prompts in the Prompt Lab, then start the worker.</div>
+          <div class="checkbox-row" style="margin-top:12px"><input type="checkbox" id="set-skipqc-dash" /><span><b>Manual QC</b> — skip the AI quality check</span></div>
+          <div class="hint" id="skipqc-hint"></div>
+          <div class="checkbox-row"><input type="checkbox" id="set-skipmeta-dash" /><span><b>Images only</b> — skip the auto title / description / tags</span></div>
+          <div class="hint" id="skipmeta-hint"></div>
+          <div class="checkbox-row"><input type="checkbox" id="set-expandstory-dash" /><span><b>Expanded storytelling</b> — longer, more detailed descriptions written as a story</span></div>
+          <div class="hint" id="expandstory-hint"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Activity</h2><button class="btn ghost" id="btn-clear-log">Clear</button></div>
+          <div id="activity-log" class="activity-log"></div>
+        </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Auto mode <span class="hint">overnight</span></h2>
+            <div class="btn-row">
+              <button class="btn primary" id="btn-auto-start">Start farming</button>
+              <button class="btn" id="btn-auto-stop" disabled>Stop</button>
+            </div>
+          </div>
+          <div id="auto-status" class="worker-status">Off. Add a theme below, then start — it ideates prompts, generates, QCs, and parks everything in Review. It never uploads.</div>
+          <div class="fld-row">
+            <label class="fld slim"><span>Prompts / round</span><input type="number" min="1" max="12" id="auto-per-round" value="4" /></label>
+            <label class="fld slim"><span>Stop after (h)</span><input type="number" min="0" max="24" step="0.5" id="auto-hours" value="8" /></label>
+            <label class="fld slim"><span>Stop at N in review</span><input type="number" min="0" max="500" id="auto-backlog" value="80" /></label>
+            <label class="fld slim"><span>Max images/hour</span><input type="number" min="0" max="500" id="auto-rate" value="0" /></label>
+          </div>
+          <div class="checkbox-row"><input type="checkbox" id="auto-learn" checked /><span>Learn while it runs <em>— weight themes by what performs, grow prompts from winners, re-read the numbers every few rounds</em></span></div>
+          <div class="fld-row" id="auto-learn-row">
+            <label class="fld slim"><span>Grow from winners</span><input type="number" min="0" max="100" step="10" id="auto-exploit" value="40" /></label>
+            <label class="fld slim"><span>Re-learn every</span><input type="number" min="0" max="50" id="auto-relearn" value="4" /></label>
+            <span class="hint" style="flex:1">% of each round's prompts are grown from a measured top performer;
+              the rest are fresh ideas. The playbook is rebuilt every N rounds.</span>
+          </div>
+          <div class="panel-head" style="margin-top:6px"><h2 style="font-size:13px">Themes <span class="hint">rotated one per round</span></h2>
+            <div class="btn-row"><button class="btn small" id="btn-auto-add-theme">+ Theme</button></div>
+          </div>
+          <div id="auto-themes" class="draft-prompts"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- OVERSEER — the chat that runs the app. `fill` because the transcript owns the
+         height and scrolls itself; a page-level scrollbar would fight the composer. -->
+    <section class="tab-pane fill" id="pane-overseer">
+      <header class="pane-head ov-head">
+        <div>
+          <h1>Overseer</h1>
+          <p class="pane-sub">Tell it what you want made — or ask it to research a concept or character online, find image references, and write grounded prompts. In agent mode it wakes on its own.</p>
+        </div>
+        <div class="ov-modes" id="ov-modes"></div>
+      </header>
+      <div id="ov-strip" class="ov-strip"></div>
+      <div id="ov-thread" class="ov-thread"></div>
+      <div id="ov-attach-strip" class="ov-attach-strip" hidden></div>
+      <div class="ov-composer" id="ov-composer">
+        <button class="btn ghost ov-attach-btn" id="btn-ov-attach" type="button" title="Attach images">📎</button>
+        <input type="file" id="ov-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+        <textarea id="ov-input" rows="2" spellcheck="false"
+          placeholder="e.g. look up Frieren online, find references, and write 6 faithful prompts"></textarea>
+        <div class="ov-send">
+          <button class="btn primary" id="btn-ov-send">Send</button>
+          <button class="btn ghost small" id="btn-ov-stop" hidden>Stop</button>
+        </div>
+      </div>
+      <div class="keyhint ov-keyhint">
+        <kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline · <kbd>Ctrl</kbd>+<kbd>V</kbd> / drop to attach images · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> jump here ·
+        it can only publish when you say so in the message, and only through the quality gate
+      </div>
+    </section>
+
+    <!-- PROMPT LAB -->
+    <section class="tab-pane" id="pane-promptlab">
+      <header class="pane-head"><h1>Prompt Lab</h1>
+        <p class="pane-sub">Feed it a prompt that worked, a picture you want more of, or a story you want told. It reads the structure and writes more like it.</p></header>
+      <!-- job profiles: the same lab, switched between the two audiences it writes for -->
+      <div class="panel" id="panel-lab-profile">
+        <div class="panel-head"><h2>Job profile</h2>
+          <div class="btn-row" id="lab-profile-switch">
+            <button class="chip" data-profile="deviantart" title="Public gallery — the measured playbook applies at full strength">◆ DeviantArt · gallery</button>
+            <button class="chip" data-profile="patreon" title="Supporter posts — the playbook is demoted to craft notes">● Patreon · supporters</button>
+          </div>
+        </div>
+        <div class="hint">Each job keeps its own <b>example prompt, theme, prompt bank and brief</b> — switching
+          restores everything where you left it. The brief below is an <b>addon</b>: the writer reads it after
+          your example, and the example always wins on subject matter and style. On the Patreon profile
+          the DeviantArt playbook is demoted to craft notes, so what performs on the gallery cannot override
+          the supporter brief.</div>
+        <label class="fld" style="margin-top:10px"><span>Instructions for this job <em>(editable — always below the example in priority)</em></span>
+          <textarea id="lab-profile-instructions" rows="3"></textarea>
+        </label>
+      </div>
+      <div class="lab-grid">
+        <div class="panel">
+          <div class="panel-head"><h2>Source prompt</h2>
+            <div class="btn-row">
+              <button class="btn small" id="btn-lab-pick">Pick from library…</button>
+              <button class="btn small" id="btn-lab-best" title="Load the best-performing prompt on record">★ Best performer</button>
+            </div>
+          </div>
+          <label class="fld"><span>Example prompt <em>(the one to imitate)</em></span>
+            <textarea id="lab-example" rows="7" placeholder="Paste a prompt you like. For Remix, separate several with a line containing only ---"></textarea>
+          </label>
+          <label class="fld"><span>Steer toward a theme <em>(optional)</em></span>
+            <input id="lab-theme" type="text" placeholder="leave blank to stay wherever the example is" />
+          </label>
+          <label class="fld"><span>Mode</span>
+            <select id="lab-mode"></select>
+          </label>
+          <div class="hint" id="lab-mode-hint"></div>
+          <div class="fld-row" style="margin-top:12px">
+            <label class="fld slim"><span>How many</span><input id="lab-count" type="number" min="1" max="16" value="6" /></label>
+            <button class="btn primary" id="btn-lab-run">Generate prompts</button>
+          </div>
+          <div class="checkbox-row"><input type="checkbox" id="lab-skeleton" checked /><span>Extract the structure first <em>(slower, much better variety)</em></span></div>
+          <div class="checkbox-row"><input type="checkbox" id="lab-guidance" checked /><span>Use what has performed best <span class="hint" id="lab-guidance-state"></span></span></div>
+          <div id="lab-status" class="hint"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Structure of the example</h2></div>
+          <div id="lab-skeleton-out" class="hint">Run the generator — the breakdown of your example appears here, including the slots it leaves empty.</div>
+        </div>
+      </div>
+      <!-- the generation queue: what the worker runs next, in order. Lives here because the
+           lab is where prompts are made; the Studio tab that used to hold it is gone. -->
+      <div class="panel" id="panel-lab-queue">
+        <div class="panel-head"><h2>Prompt queue <span class="hint" id="queue-count"></span></h2>
+          <div class="btn-row">
+            <button class="btn small" id="btn-add-manual">+ Manual prompt</button>
+            <button class="btn small" id="btn-paste-toggle" aria-expanded="false" title="Paste several prompts at once — one per line">Paste list ▾</button>
+            <button class="btn danger small" id="btn-clear-done">Clear finished</button>
+          </div>
+        </div>
+        <div class="queue-add" id="manual-box" hidden>
+          <label class="fld"><span>One prompt — queued as written</span>
+            <textarea id="manual-input" rows="3" placeholder="a fox spirit wandering a lantern-lit forest, soft rim light…"></textarea></label>
+          <div class="btn-row">
+            <button class="btn ghost small" data-addclose="manual-box">Cancel</button>
+            <button class="btn primary small" id="btn-manual-queue">Queue</button>
+          </div>
+        </div>
+        <div class="queue-add" id="paste-box" hidden>
+          <label class="fld"><span>One prompt per line — blank and very short lines are ignored</span>
+            <textarea id="paste-list-input" rows="8" placeholder="a fox spirit wandering a lantern-lit forest, soft rim light…&#10;a friendly android in a neon alley, low angle…"></textarea></label>
+          <div class="btn-row">
+            <button class="btn ghost small" data-addclose="paste-box">Cancel</button>
+            <button class="btn primary small" id="btn-paste-queue">Queue list</button>
+          </div>
+        </div>
+        <div id="queue-list" class="queue-list"></div>
+      </div>
+      <!-- image references: build prompts from pictures instead of from a prompt -->
+      <div class="panel" id="panel-lab-refs">
+        <div class="panel-head"><h2>Build from image references <span class="hint" id="lab-ref-count"></span></h2>
+          <div class="btn-row">
+            <button class="btn small" id="btn-ref-da"
+              title="Your published gallery, strongest first — for when a post takes off and you want more of it">◆ Pick from DeviantArt…</button>
+            <button class="btn small" id="btn-ref-library">▣ Pick from library…</button>
+            <button class="btn small" id="btn-ref-file">Add image file…</button>
+            <button class="btn ghost small" id="btn-ref-clear">Clear</button>
+          </div>
+        </div>
+        <div class="hint">Have a picture you want more of? Add it here and the writer works from it.
+          Three ways in, and they know different amounts: a <b>file</b> is pixels only, so the vision model
+          reads it — subject, wardrobe, lighting, camera, palette, rendering style. A card from the
+          <b>library</b> still carries the prompt that made it. And a post already up on
+          <b>DeviantArt</b> is looked up in the prompt archive, so a deviation from a year ago whose card
+          was deleted can still hand the writer the exact words that produced it — which is the case worth
+          having when something goes unexpectedly well. References are read once and kept for the session;
+          changing the mode or the count re-writes without re-reading.</div>
+        <input type="file" id="ref-file-input" accept="image/*" multiple hidden />
+        <div id="ref-strip" class="ref-strip"></div>
+        <div class="fld-row" style="margin-top:12px">
+          <label class="fld" style="max-width:260px"><span>Mode</span><select id="ref-mode"></select></label>
+          <label class="fld slim"><span>How many</span><input id="ref-count" type="number" min="1" max="16" value="4" /></label>
+          <label class="fld"><span>Steer toward <em>(optional)</em></span>
+            <input id="ref-theme" type="text" placeholder="leave blank to stay where the references are" /></label>
+        </div>
+        <div class="hint" id="ref-mode-hint"></div>
+        <label class="fld" style="margin-top:10px"><span>Extra instruction <em>(optional)</em></span>
+          <input id="ref-extra" type="text" placeholder="e.g. keep every prompt vertical / portrait framing" /></label>
+        <div class="btn-row">
+          <button class="btn" id="btn-ref-read">Read references</button>
+          <button class="btn primary" id="btn-ref-run">Write prompts from references</button>
+        </div>
+        <div id="ref-status" class="hint"></div>
+        <div id="ref-briefs"></div>
+      </div>
+      <!-- stories: describe what happens, get prompts that stage it -->
+      <div class="panel" id="panel-lab-story">
+        <div class="panel-head"><h2>Build from a story</h2></div>
+        <div class="hint">Describe a story in your own words — who it is about, what happens to them, where it
+          ends up. The app reads it into characters and key moments, then writes real generator prompts from it,
+          in your own prompt style: <b>Scene by scene</b> turns it into an in-order sequence,
+          <b>The strongest moment</b> stages the single best scene several ways, and
+          <b>Pictures from this story</b> writes standalone posts set inside it. The story is read once and
+          kept — change the mode or the count and re-write without paying for the read again.</div>
+        <label class="fld" style="margin-top:10px"><span>The story <em>(plain words — rough notes are fine)</em></span>
+          <textarea id="story-text" rows="7" placeholder="e.g. A young inventor finds a broken robot in the rain. Over the evening she repairs it — first the arms, then the voice box. By midnight it is helping her bake bread…"></textarea>
+        </label>
+        <div class="fld-row" style="margin-top:12px">
+          <label class="fld" style="max-width:260px"><span>Mode</span><select id="story-mode"></select></label>
+          <label class="fld slim"><span>How many</span><input id="story-count" type="number" min="1" max="16" value="6" /></label>
+          <label class="fld"><span>Extra instruction <em>(optional)</em></span>
+            <input id="story-extra" type="text" placeholder="e.g. keep every prompt vertical / stay in the shop" /></label>
+        </div>
+        <div class="hint" id="story-mode-hint"></div>
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn" id="btn-story-read">Read the story</button>
+          <button class="btn primary" id="btn-story-run">Write prompts from the story</button>
+        </div>
+        <div id="story-status" class="hint"></div>
+        <div id="story-breakdown"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Generated prompts <span class="hint" id="lab-count-out"></span></h2>
+          <div class="btn-row">
+            <button class="btn" id="btn-lab-save-all">Save all to bank</button>
+            <button class="btn primary" id="btn-lab-queue">Queue all</button>
+          </div>
+        </div>
+        <div id="lab-results" class="draft-prompts"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Prompt bank — <span id="lab-bank-profile"></span> <span class="hint" id="lab-bank-count"></span></h2>
+          <div class="btn-row"><button class="btn small" id="btn-bank-add" title="Save a prompt you wrote yourself straight into this job's bank">+ Add by hand</button></div>
+        </div>
+        <div id="lab-bank" class="drafts-list"></div>
+      </div>
+    </section>
+
+    <!-- REVIEW -->
+    <section class="tab-pane" id="pane-review">
+      <header class="pane-head"><h1>Review</h1><p class="pane-sub">Vision-QC results. Edit metadata, approve or reject. Nothing uploads without your approval.</p></header>
+      <div class="filter-row" id="review-filters">
+        <button class="chip active" data-filter="review">Needs review</button>
+        <!-- Cuts across status rather than being one: an Overseer card can be waiting,
+             approved or already uploaded, and "what did the agent make" is a question
+             about provenance. See cardsForFilter. -->
+        <button class="chip" data-filter="agent" title="Everything the Overseer made — waiting, approved or already uploaded. Rejected and discarded ones drop out of this view, so the next card moves up as you triage; they are still on their own chips.">Agent generated</button>
+        <!-- Also not a status: the pictures picked as keepers in Pick keepers, still in the
+             Review reserve. See triage.js. -->
+        <button class="chip" data-filter="keepers" title="Pictures you picked as the keeper of their batch in Pick keepers — your reserve, still in Review">★ Keepers</button>
+        <button class="chip" data-filter="qc_error">QC failed to run</button>
+        <button class="chip" data-filter="approved">Approved</button>
+        <button class="chip" data-filter="discarded">Discarded</button>
+        <button class="chip" data-filter="rejected">Rejected</button>
+        <button class="chip" data-filter="all">All</button>
+        <span style="flex:1"></span>
+        <input id="review-search" type="search" spellcheck="false" autocomplete="off"
+               placeholder="Search title, prompt, theme, tag…" title="Filters the grid as you type. Esc clears." />
+        <span class="sort-group">
+          <label for="review-sort">Sort</label>
+          <select id="review-sort" title="What orders the grid">
+            <option value="score">Confidence (QC score)</option>
+            <option value="newest">Date generated</option>
+            <option value="updated">Last touched</option>
+            <option value="title">Title</option>
+          </select>
+          <button class="btn small" id="btn-review-dir" title="Ascending / descending">↓ Best first</button>
+        </span>
+        <span id="review-count" class="hint"></span>
+      </div>
+      <div class="filter-row" id="review-actions">
+        <button class="btn primary small" id="btn-pick-keepers" title="Judge Review one prompt at a time: all renders of a prompt side by side, press the number of the keeper, Enter discards the rest (P)">▦ Pick keepers</button>
+        <button class="btn small" id="btn-retry-qc-all" hidden>Retry QC on all listed</button>
+        <button class="btn small" id="btn-qcerr-to-review" hidden
+          title="Skip the AI inspection for these and judge them by eye in Review — for when the vision model is down or the AI check is off">Send to Review uninspected</button>
+        <button class="btn small" id="btn-write-meta-all" hidden>Write metadata for all listed</button>
+        <button class="btn small" id="btn-enhance-meta-all" hidden
+          title="Rewrite every listed card's title, description and tags from the finished image instead of the prompt. One vision call per card.">✨ Enhance all listed</button>
+        <button class="btn small" id="btn-approve-all">Approve all listed</button>
+        <button class="btn danger small" id="btn-discard-below">Discard below score…</button>
+        <button class="btn danger small" id="btn-discard-all">Discard all listed</button>
+        <span class="sort-group" id="discard-tail-group">
+          <label for="discard-tail-n">Discard from bottom</label>
+          <select id="discard-tail-n" title="How many cards to discard, counting up from the bottom of the list as it is sorted right now">
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+            <option value="custom">Custom…</option>
+          </select>
+          <button class="btn danger small" id="btn-discard-tail">Discard 50</button>
+        </span>
+        <button class="btn danger small" id="btn-purge-discarded" hidden title="Deletes the discarded cards AND their image files from disk — the only bulk way to reclaim the space">Delete discarded + files…</button>
+      </div>
+      <div class="keyhint">
+        <kbd>P</kbd> pick keepers, batch by batch · <kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> approve · <kbd>R</kbd> reject ·
+        <kbd>E</kbd> write metadata · <kbd>V</kbd> enhance from the image · <kbd>U</kbd> upload · <kbd>Space</kbd> zoom ·
+        <kbd>←</kbd>/<kbd>→</kbd> browse while zoomed · <kbd>Esc</kbd> close
+      </div>
+      <div id="review-grid" class="review-grid"></div>
+    </section>
+
+    <!-- DRAFTS -->
+    <section class="tab-pane" id="pane-drafts">
+      <header class="pane-head"><h1>DeviantArt drafts</h1><p class="pane-sub">Approved art is uploaded to DeviantArt. With <b>submit after upload</b> on, one click uploads it and presses Submit; with it off it stops at a Sta.sh draft for you to submit.</p></header>
+      <div class="panel" id="da-status-panel">
+        <div class="panel-head"><h2>DeviantArt connection</h2>
+          <div class="btn-row">
+            <button class="btn primary" id="btn-da-open-login">Open DeviantArt tab</button>
+            <button class="btn" id="btn-da-whoami">Test</button>
+            <button class="btn ghost" id="btn-da-connect">Connect API (OAuth)</button>
+            <button class="btn ghost" id="btn-da-logout">Disconnect API</button>
+          </div>
+        </div>
+        <div id="da-status" class="hint">Not connected.</div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Ready to upload</h2>
+          <div class="btn-row"><button class="btn primary" id="btn-upload-all">Upload all approved</button></div>
+        </div>
+        <div class="checkbox-row"><input type="checkbox" id="set-auto-publish" checked /><span>Submit to DeviantArt after upload <em>— press Submit for me, instead of leaving it in Sta.sh</em></span></div>
+        <div class="hint" id="auto-publish-note"></div>
+        <div class="note" id="drafts-patreon-note" hidden></div>
+        <div id="drafts-ready" class="drafts-list"></div>
+      </div>
+      <div class="panel" id="panel-rejected" hidden>
+        <div class="panel-head"><h2>Rejected by DeviantArt <span class="hint" id="rejected-count"></span></h2>
+          <div class="btn-row"><button class="btn danger" id="btn-discard-rejected">Discard all</button></div>
+        </div>
+        <div class="hint">DeviantArt refused these submissions. Retrying the same file gets the same
+          answer — edit the title/description, upscale or re-crop the image, then retry. They are
+          skipped by “Upload all approved” so they can never jam the queue.</div>
+        <div id="drafts-rejected" class="drafts-list"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Published <span class="hint" id="stash-count"></span></h2>
+          <div class="btn-row">
+            <button class="btn" id="btn-refresh-stash">Refresh from DeviantArt</button>
+            <button class="btn" id="btn-open-stash">Open Sta.sh drafts ↗</button>
+          </div>
+        </div>
+        <div id="drafts-done" class="drafts-list"></div>
+      </div>
+    </section>
+
+    <!-- STATISTICS -->
+    <section class="tab-pane" id="pane-stats">
+      <header class="pane-head"><h1>DeviantArt statistics</h1>
+        <p class="pane-sub">What you published, what it earned, and what the app has learned from it.</p></header>
+      <div class="panel">
+        <div class="panel-head"><h2>Performance data</h2>
+          <div class="btn-row">
+            <label class="fld slim" style="margin:0;max-width:96px"><span>Newest</span>
+              <input type="number" min="1" max="2000" step="10" id="stats-limit" value="50" title="How many of your most recent deviations to read" /></label>
+            <button class="btn primary" id="btn-stats-sync">Sync newest</button>
+            <button class="btn" id="btn-stats-sync-full" title="Reads every deviation in your gallery, with view counts. Slowest.">Full recap</button>
+            <button class="btn" id="btn-stats-sync-fast" title="Every deviation, but skips the per-deviation view lookup — much faster, favourites and comments only">Quick sync</button>
+            <button class="btn" id="btn-stats-learn">Rebuild playbook</button>
+          </div>
+        </div>
+        <div id="stats-sync-status" class="hint">Never synced. This reads your published gallery through the DeviantArt tab's session — read-only, nothing is posted or changed.</div>
+      </div>
+      <div class="card-row" id="stats-cards"></div>
+      <div class="dash-grid">
+        <div class="panel">
+          <div class="panel-head"><h2>What worked best <span class="hint">by engagement per day</span></h2></div>
+          <div id="stats-top" class="drafts-list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>The playbook <span class="hint" id="stats-playbook-age"></span></h2></div>
+          <div id="stats-playbook"></div>
+        </div>
+      </div>
+      <!-- Teach it. Everything above this panel is derived and is rewritten by the next
+           rebuild; everything inside it is written by hand and survives every rebuild,
+           sync and model output. That distinction is the whole design — see teach.js. -->
+      <div class="panel" id="panel-teach">
+        <div class="panel-head"><h2>Teach it <span class="hint" id="teach-count"></span></h2>
+          <div class="btn-row">
+            <button class="btn" id="btn-teach-freeform" title="Say it in your own words and have the model turn it into structured lessons for you to approve">Teach in your own words</button>
+          </div>
+        </div>
+        <div class="note">Anything you write here <b>outranks everything measured</b> and is never
+          overwritten by a rebuild. This is the override for when you know something the numbers
+          have not caught up with — or when the loop has latched onto one idea and you want it out.</div>
+        <div class="teach-grid">
+          <div class="teach-col">
+            <h4>Your lessons</h4>
+            <div class="hint">Concrete instructions for writing the next prompt. Marked <b>always</b>
+              they survive even a wildcard round.</div>
+            <div id="teach-lessons" class="teach-list"></div>
+            <div class="fld-row" style="align-items:flex-end">
+              <label class="fld" style="flex:1"><span>Add a lesson</span>
+                <input id="teach-new" placeholder="e.g. keep the light motivated by something visible in frame" /></label>
+              <label class="fld slim" style="max-width:110px"><span>Weight</span>
+                <select id="teach-new-weight"><option value="prefer">prefer</option><option value="always">always</option></select></label>
+              <button class="btn primary" id="btn-teach-add">Add</button>
+            </div>
+          </div>
+          <div class="teach-col">
+            <h4>Hard rules</h4>
+            <div class="hint">One per line. Short and absolute — these are injected as constraints,
+              not suggestions.</div>
+            <label class="fld"><span>Always</span>
+              <textarea id="teach-always" rows="3" placeholder="the face must be fully in frame"></textarea></label>
+            <label class="fld"><span>Never</span>
+              <textarea id="teach-never" rows="3" placeholder="no text or speech bubbles in the image"></textarea></label>
+            <label class="fld"><span>Banned words and phrases <em>— checked, not just requested: any prompt containing one is thrown away before it is queued</em></span>
+              <textarea id="teach-banned" rows="2" placeholder="neon lighting, rainy streets"></textarea></label>
+            <label class="fld"><span>Context for the model</span>
+              <textarea id="teach-notes" rows="2" placeholder="anything it should know about what you are going for"></textarea></label>
+            <div class="btn-row"><button class="btn primary" id="btn-teach-save">Save rules</button>
+              <span class="hint" id="teach-saved"></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>What works <span class="hint">lift vs. your own median — shrunk toward 1 by sample size, so a thin result cannot shout</span></h2></div>
+        <div id="stats-breakdowns" class="break-grid"></div>
+      </div>
+      <!-- The prompt archive. See origins.js — this is the tab that answers "what did I
+           actually write to get that one", including for the deviations whose card is
+           long gone. -->
+      <div class="panel" id="panel-archive">
+        <div class="panel-head"><h2>What made it <span class="hint" id="archive-coverage"></span></h2>
+          <div class="btn-row">
+            <input id="archive-search" type="search" spellcheck="false" autocomplete="off"
+                   placeholder="Search a published title, prompt, theme or tag…" />
+            <button class="btn small" id="btn-archive-rescan" title="Re-match published deviations against the library — run this after uploading or after editing titles">Re-match</button>
+          </div>
+        </div>
+        <div class="hint">Click any row for the prompt that generated it, and the buttons to
+          queue it again or ask for a continuation.</div>
+        <div id="archive-list" class="archive-list"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Everything published <span class="hint" id="stats-all-count"></span></h2>
+          <div class="btn-row">
+            <select id="stats-sort" style="width:auto">
+              <option value="vsPeers">vs same-age posts</option>
+              <option value="perDay">Engagement / day</option>
+              <option value="views">Views</option>
+              <option value="favs">Favourites</option>
+              <option value="comments">Comments</option>
+              <option value="favRate">Favourite rate</option>
+              <option value="trend">Still climbing</option>
+              <option value="recent">Newest</option>
+            </select>
+          </div>
+        </div>
+        <div id="stats-table"></div>
+      </div>
+    </section>
+
+    <!-- COMICS -->
+    <!-- Two things live here, and they are genuinely different objects.
+         A PAGE is several panels in gutters with the words drawn on top — one image file,
+         one deviation. A STORY is one picture with a block of prose beside it, which the
+         page layout cannot express because there the text is the point rather than a label
+         on the art. The builder is the same for both up to the moment of composition. -->
+    <section class="tab-pane" id="pane-comics">
+      <header class="pane-head"><h1>Comics</h1>
+        <p class="pane-sub">Write it, draw it panel by panel, letter it, and send the finished page to Review like any other picture.</p></header>
+      <div class="comic-shell">
+        <aside class="comic-rail">
+          <div class="panel-head"><h2>Projects</h2></div>
+          <div class="btn-row" style="margin-bottom:10px">
+            <button class="btn primary small" id="btn-comic-new-page">+ Comic page</button>
+            <button class="btn small" id="btn-comic-new-story">+ Illustrated story</button>
+          </div>
+          <div id="comic-projects" class="comic-projects"></div>
+        </aside>
+        <div class="comic-work" id="comic-work"></div>
+      </div>
+    </section>
+
+    <!-- CONTINUATIONS -->
+    <!-- The request under a picture is the cheapest signal this whole app gets: somebody
+         has already told you what they want more of, by name. The tab exists to make
+         acting on that a two-minute job instead of a rummage through the browser. -->
+    <section class="tab-pane" id="pane-continuations">
+      <header class="pane-head"><h1>Continuations</h1>
+        <p class="pane-sub">Someone asked for a part two. Pick the deviation, say what changes, and the writer keeps the character.</p></header>
+      <div class="cont-grid">
+        <div class="panel">
+          <div class="panel-head"><h2>Continue which one</h2>
+            <div class="btn-row"><button class="btn small" id="btn-cont-pick">Pick published…</button>
+              <button class="btn ghost small" id="btn-cont-pick-card">Pick from library…</button></div>
+          </div>
+          <div id="cont-source" class="cont-source"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>The request <span class="hint" id="cont-comment-state"></span></h2>
+            <div class="btn-row"><button class="btn small" id="btn-cont-comments">Read the comments</button></div>
+          </div>
+          <label class="fld"><span>What was asked for <em>(paste a comment, or write it yourself)</em></span>
+            <textarea id="cont-request" rows="3" placeholder="e.g. “please make a part 2 where the dragon finally reaches the mountain top”"></textarea></label>
+          <div id="cont-comments" class="cont-comments"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>How it continues</h2></div>
+        <label class="fld"><span>Your direction <em>(what actually changes — this beats the request if they disagree)</em></span>
+          <input id="cont-instruction" type="text" placeholder="e.g. same character, one hour later, standing on the castle balcony at sunset" /></label>
+        <div class="fld-row">
+          <label class="fld slim"><span>How many</span><input id="cont-count" type="number" min="1" max="8" value="2" /></label>
+          <label class="fld slim"><span>Keep fixed</span>
+            <select id="cont-anchor-preset">
+              <option value="character">The character</option>
+              <option value="character+outfit">Character + outfit</option>
+              <option value="character+setting">Character + setting</option>
+              <option value="everything">Character, outfit and setting</option>
+            </select></label>
+          <label class="fld"><span>Style note <em>(optional)</em></span>
+            <input id="cont-style" type="text" placeholder="leave blank to keep the original's style" /></label>
+        </div>
+        <div class="checkbox-row"><input type="checkbox" id="cont-vision" /><span><b>Look at the original first</b>
+          <em>— reads the actual image with the vision model, so details the prompt never mentioned (hair, eyes, the exact outfit) carry over. Slower, and needs the image file.</em></span></div>
+        <div class="checkbox-row"><input type="checkbox" id="cont-guidance" checked /><span>Use what has performed best</span></div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn primary" id="btn-cont-write">Write the continuation</button>
+          <button class="btn" id="btn-cont-save-request">Save as a request</button>
+        </div>
+        <div id="cont-status" class="hint"></div>
+        <div id="cont-results" class="draft-prompts"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Request board <span class="hint" id="cont-board-count"></span></h2>
+          <div class="btn-row">
+            <button class="chip active" data-creq="open">Open</button>
+            <button class="chip" data-creq="queued">Queued</button>
+            <button class="chip" data-creq="done">Done</button>
+            <button class="chip" data-creq="all">All</button>
+          </div>
+        </div>
+        <div id="cont-board" class="drafts-list"></div>
+      </div>
+    </section>
+
+    <!-- PERCHANCE -->
+    <section class="tab-pane fill" id="pane-perchance">
+      <div class="webview-bar">
+        <span class="wv-title" id="pch-title">Perchance · AI Character Generator</span>
+        <div class="btn-row">
+          <label class="wv-inline"><span>Generator</span>
+            <select id="pch-generator">
+              <option value="classic">Classic</option>
+              <option value="advanced">Advanced</option>
+            </select></label>
+          <button class="btn" id="btn-pch-read-options">Read options</button>
+          <button class="btn" id="btn-pch-reload">Reload</button>
+          <button class="btn" id="btn-pch-probe">Probe DOM</button>
+        </div>
+      </div>
+      <webview id="wv-perchance" src="https://perchance.org/ai-character-generator" partition="persist:perchance" allowpopups></webview>
+    </section>
+
+    <!-- UPSCALER -->
+    <section class="tab-pane fill" id="pane-upscaler">
+      <div class="webview-bar">
+        <span class="wv-title">ImgUpscaler · <span id="upscale-hint">log in once — session persists</span></span>
+        <div class="btn-row">
+          <label class="wv-inline"><span>Ratio</span>
+            <select id="up-factor" title="Applied automatically when a card is sent here">
+              <option value="4">4x — 400%</option>
+              <option value="2">2x — 200%</option>
+            </select></label>
+          <button class="btn" id="btn-up-send">Send pending image</button>
+          <button class="btn" id="btn-up-drive" title="Pick the ratio, press Upscale, then press Download — for you">Run it now</button>
+          <button class="btn" id="btn-up-probe" title="Dump the controls this page is currently offering">Probe DOM</button>
+          <button class="btn" id="btn-up-clear">Clear pending</button>
+          <button class="btn" id="btn-up-reload">Reload</button>
+        </div>
+      </div>
+      <div class="upscale-strip" id="upscale-strip"></div>
+      <webview id="wv-upscale" src="https://imgupscaler.com/" partition="persist:upscaler" allowpopups></webview>
+    </section>
+
+    <!-- PATREON -->
+    <!-- A posting deck, not a robot.
+         Patreon's composer cannot be driven reliably — it is a rich text editor with tiers,
+         attachments and scheduling hanging off it, and it hydrates on its own schedule. So
+         the app stops trying to press its buttons and instead removes the *fetching*: the
+         picture, the title and the description each go onto the clipboard on one keystroke,
+         in the order the composer asks for them. Posting a card becomes paste, paste, paste.
+         Publish stays yours here: DeviantArt has an endpoint the app can call for the Submit
+         press, Patreon has an editor that would have to be driven — which is the difference. -->
+    <section class="tab-pane fill" id="pane-patreon">
+      <div class="webview-bar">
+        <span class="wv-title">Patreon · <span id="patreon-hint">approved for Patreon</span></span>
+        <div class="btn-row">
+          <button class="btn" id="btn-pat-new">New post ↗</button>
+          <button class="btn" id="btn-pat-browser" title="Open Patreon in your normal browser instead">Open in browser ↗</button>
+          <button class="btn" id="btn-pat-toggle-wv">Show Patreon page</button>
+          <button class="btn" id="btn-pat-reload" hidden>Reload</button>
+        </div>
+      </div>
+      <!-- Page hidden: the deck is the whole pane. Page shown: the composer gets the full
+           height on the left and the deck becomes a sidebar (.pat-split) — the composer is
+           where the posting happens, so it is never the thing that gets squeezed. -->
+      <div class="pat-body">
+        <div class="pat-web">
+          <webview id="wv-patreon" src="https://www.patreon.com/" partition="persist:patreon" allowpopups hidden></webview>
+        </div>
+        <div class="pat-side">
+          <div class="pat-deck" id="pat-deck"></div>
+          <div class="pat-queue-wrap" id="pat-queue-wrap">
+            <div class="pat-queue-head">
+              <h2>Waiting for Patreon <span class="hint" id="pat-queue-count"></span></h2>
+              <span class="hint">click a card to load it</span>
+            </div>
+            <div class="pat-queue" id="pat-queue"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DEVIANTART -->
+    <section class="tab-pane fill" id="pane-deviantart">
+      <div class="webview-bar">
+        <span class="wv-title">DeviantArt · <span id="da-wv-hint">log in once — session persists</span></span>
+        <div class="btn-row">
+          <button class="btn" id="btn-da-login-helper">Auto-fill login</button>
+          <button class="btn" id="btn-da-goto-stash">Sta.sh drafts</button>
+          <button class="btn" id="btn-da-reload">Reload</button>
+        </div>
+      </div>
+      <webview id="wv-da" src="https://www.deviantart.com/" partition="persist:da" allowpopups></webview>
+    </section>
+
+    <!-- PIXIV -->
+    <!-- A session tab, exactly like the DeviantArt one — NOT a posting deck.
+         Patreon needs a deck because its composer has to be driven by a human. Pixiv has a
+         single endpoint that takes the picture and all of its metadata in one request, so
+         publishing belongs in the Drafts queue next to DeviantArt, and nothing about it
+         should need a visit here. What this tab is for is the login — pixiv answers 403 to
+         any request that does not come from a real signed-in page, so the upload is made
+         *by* this guest. Sign in once; the partition keeps it. -->
+    <section class="tab-pane fill" id="pane-pixiv">
+      <div class="webview-bar">
+        <span class="wv-title">Pixiv · <span id="pixiv-hint">log in once — session persists</span></span>
+        <div class="btn-row">
+          <button class="btn" id="btn-px-check">Check sign-in</button>
+          <button class="btn" id="btn-px-home">Upload page</button>
+          <button class="btn" id="btn-px-probe" title="Check which fields Prepare can still fill, and dump the radio values the live upload form is offering">Probe form</button>
+          <button class="btn" id="btn-px-reload">Reload</button>
+        </div>
+      </div>
+      <!-- The staged-card banner. pixiv put a human check on its upload endpoint, so a card
+           can be sitting filled-in on the page below waiting for a Post that only a person
+           can press — this is what says which card that is, and what is still missing from
+           the form. Hidden whenever nothing is staged. -->
+      <div class="px-staged" id="px-staged" hidden></div>
+      <details class="fold px-diag"><summary>Diagnostics <em>— the exact fields sent, and pixiv's raw reply</em></summary>
+        <div id="px-diag-body" class="hint"></div>
+      </details>
+      <!-- Never `hidden`. Electron does not attach a <webview> whose element is
+           display:none, and this guest is not a preview of the work — it is the thing that
+           performs the upload. Hiding it to save space would take the uploader with it. -->
+      <webview id="wv-pixiv" src="https://www.pixiv.net/" partition="persist:pixiv" allowpopups></webview>
+    </section>
+
+    <!-- SETTINGS -->
+    <!-- One section at a time, chosen from the index on the left. The old page put all
+         eleven panels on screen at once, which is how a wrong timeout hides in plain
+         sight. Search cuts across every section, because knowing WHICH section a setting
+         lives in is exactly the knowledge someone hunting a setting does not have. -->
+    <section class="tab-pane" id="pane-settings">
+      <header class="pane-head set-head">
+        <div>
+          <h1>Settings</h1>
+          <p class="pane-sub">Every change saves the moment you make it — there is no Save button.</p>
+        </div>
+        <div class="set-search">
+          <span class="set-search-ico">⌕</span>
+          <input id="set-search" type="search" spellcheck="false" autocomplete="off"
+                 placeholder="Search every setting — timeout, api key, tags, gallery…" />
+          <span id="set-search-count" class="hint"></span>
+        </div>
+      </header>
+      <div class="settings-shell">
+        <nav class="settings-nav" id="settings-nav"></nav>
+        <div class="settings-body" id="settings-root"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="triage-root" hidden></div>
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+
+<script src="state.js"></script>
+<script src="perchance.js"></script>
+<script src="comfy.js"></script>
+<script src="videocheck.js"></script>
+<!-- Before pipeline.js: the pixiv poster is a driver, like the perchance one, and the
+     pipeline calls into it from postCardToPixiv. -->
+<script src="pixiv.js"></script>
+<script src="variety.js"></script>
+<script src="insights.js"></script>
+<script src="teach.js"></script>
+<!-- After insights.js: the title corpus folds in the DeviantArt titles that insights owns. -->
+<script src="titles.js"></script>
+<script src="promptstyle.js"></script>
+<script src="promptlab.js"></script>
+<script src="pipeline.js"></script>
+<script src="triage.js"></script>
+<!-- After pipeline.js: the prompt archive is written from the upload path, and the
+     continuation engine queues jobs through Pipeline.makeJob. -->
+<script src="origins.js"></script>
+<script src="continuations.js"></script>
+<script src="comiclayout.js"></script>
+<script src="comics.js"></script>
+<!-- After pipeline.js: the teaser routes the pair with Pipeline.setDestination and
+     reuses its description transforms. -->
+<script src="teaser.js"></script>
+<!-- After pipeline.js and insights.js: the Overseer's tools are thin wrappers over both,
+     plus AutoMode, Teach, PromptStyle and Variety. It reaches for all of them at call time,
+     so load order only has to guarantee they exist before the first tick — but keeping it
+     here documents the dependency. -->
+<script src="overseer.js"></script>
+<script src="health.js"></script>
+<script src="providers.js"></script>
+<script src="originsui.js"></script>
+<script src="continuationsui.js"></script>
+<script src="comicsui.js"></script>
+<script src="pixivui.js"></script>
+<script src="overseerui.js"></script>
+<script src="triageui.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

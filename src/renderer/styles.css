@@ -1,0 +1,1903 @@
+/* AiLaborAutomation — several palettes, one set of tokens.
+ *
+ * :root IS the Stone theme (warm stone + amber, the original look) and is also the
+ * fallback, so a window that somehow never gets a data-theme attribute still renders a
+ * complete UI rather than an unstyled one.
+ *
+ * Everything below the token blocks refers to tokens only. Adding a third theme should
+ * mean adding one block here and one entry in theme.js, and touching nothing else.
+ */
+
+:root {
+  /* surfaces */
+  --bg: #0c0a09;
+  --bg-raise: #141210;
+  --bg-panel: #1c1917;
+  --bg-hover: #292524;
+  --bg-hover-strong: #353130;
+  --bg-sink: #0c0a09;
+  --bg-sunken: rgba(0, 0, 0, .18);
+  --border: #2b2724;
+  --border-strong: #44403c;
+  --border-hover: #57534e;
+  /* type */
+  --text: #f5f5f4;
+  --text-dim: #a8a29e;
+  --text-faint: #78716c;
+  /* accent — the one colour the app leans on. --on-accent is what stays legible on it. */
+  --accent: #f59e0b;
+  --accent-soft: #fbbf24;
+  --accent-dim: #b45309;
+  --on-accent: #1c1917;
+  /* warning — amber in every theme, because a warning that looks like a success is a
+     bug. Identical to the accent here only because Stone's accent happens to be amber. */
+  --warn: #f59e0b;
+  --warn-soft: #fbbf24;
+  --warn-dim: #b45309;
+  /* status */
+  --green: #34d399;
+  --red: #f87171;
+  --red-dim: #7f1d1d;
+  --blue: #60a5fa;
+  --ok: #7bbf7b;
+  --ok-soft: #6ec48b;
+  --bad: #d98a8a;
+  --info: #7fb3d5;
+  --wild: #c58fd6;
+  /* the flat tints behind status pills */
+  --tint-run: #451a03;
+  --tint-bad: #451a03;
+  --tint-info: #172554;
+  --tint-ok: #022c22;
+  --tint-idle: #292524;
+  /* shape and type */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --font: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
+  --mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+}
+
+/* Verdant — grey and green, sampled off src/assets/icon.png rather than guessed: the
+ * surfaces come from the badge's own cool greys (#14181c … #24282c) and the accent from
+ * its brightest neon strokes (#189c3c … #30b454), nudged up for legibility on dark.
+ *
+ * --green stays a status colour and is deliberately NOT the accent here. With both set
+ * to green there is no way to read "this is actionable" apart from "this succeeded", so
+ * success shifts to teal and the accent keeps the logo's grass green to itself.
+ */
+:root[data-theme="verdant"] {
+  --bg: #0d1113;
+  --bg-raise: #131a1c;
+  --bg-panel: #1a2124;
+  --bg-hover: #232c2f;
+  --bg-hover-strong: #2d383a;
+  --bg-sink: #0d1113;
+  --bg-sunken: rgba(0, 0, 0, .22);
+  --border: #263133;
+  --border-strong: #3d4b4c;
+  --border-hover: #526360;
+  --text: #eef4f0;
+  --text-dim: #a2b0aa;
+  --text-faint: #6f807b;
+  --accent: #35c94f;
+  --accent-soft: #6ee88a;
+  --accent-dim: #1a7a30;
+  --on-accent: #08150c;
+  --warn: #e0a83a;
+  --warn-soft: #f0c469;
+  --warn-dim: #8a5a12;
+  --green: #2dd4bf;
+  --red: #f87171;
+  --red-dim: #7f1d1d;
+  --blue: #60a5fa;
+  --ok: #6ec48b;
+  --ok-soft: #8ad9a2;
+  --bad: #d98a8a;
+  --info: #7fb3d5;
+  --wild: #c58fd6;
+  --tint-run: #0d3018;
+  --tint-bad: #3a1414;
+  --tint-info: #152738;
+  --tint-ok: #04302b;
+  --tint-idle: #232c2f;
+}
+
+/* Seven more dark palettes. Same token contract as above; each keeps --green (success),
+ * --warn (amber/yellow) and --red visibly apart from its own accent, so actionable,
+ * succeeded, warning and failed never read as the same colour. Accents whose hue would
+ * collide with a status colour move that status colour instead (Ocean: success -> green,
+ * Midnight: info -> sky, Amethyst: wild -> orchid, Ember: warn -> yellow).
+ */
+:root[data-theme="midnight"] {
+  --bg: #0b0f19;
+  --bg-raise: #10162a;
+  --bg-panel: #161d33;
+  --bg-hover: #1f2842;
+  --bg-hover-strong: #29344f;
+  --bg-sink: #0b0f19;
+  --bg-sunken: rgba(0, 0, 0, .25);
+  --border: #232c45;
+  --border-strong: #38445f;
+  --border-hover: #4c5a78;
+  --text: #eef1fa;
+  --text-dim: #a3acc4;
+  --text-faint: #6e7894;
+  --accent: #7c9cff;
+  --accent-soft: #a8bcff;
+  --accent-dim: #3b52a8;
+  --on-accent: #0a0f1f;
+  --warn: #e8b04a;
+  --warn-soft: #f3c96f;
+  --warn-dim: #8a6212;
+  --green: #34d399;
+  --red: #f87171;
+  --red-dim: #7f1d1d;
+  --blue: #38bdf8;
+  --ok: #6ec48b;
+  --ok-soft: #8ad9a2;
+  --bad: #e08f8f;
+  --info: #7cc4e8;
+  --wild: #c58fd6;
+  --tint-run: #1a2350;
+  --tint-bad: #3a1418;
+  --tint-info: #0f2a3d;
+  --tint-ok: #062e24;
+  --tint-idle: #1f2842;
+}
+
+:root[data-theme="amethyst"] {
+  --bg: #0f0b14;
+  --bg-raise: #15101c;
+  --bg-panel: #1d1627;
+  --bg-hover: #281f35;
+  --bg-hover-strong: #342942;
+  --bg-sink: #0f0b14;
+  --bg-sunken: rgba(0, 0, 0, .22);
+  --border: #2d2340;
+  --border-strong: #443758;
+  --border-hover: #5b4b73;
+  --text: #f4effa;
+  --text-dim: #b3a7c4;
+  --text-faint: #7d7191;
+  --accent: #a78bfa;
+  --accent-soft: #c4b5fd;
+  --accent-dim: #5b3fb8;
+  --on-accent: #140b24;
+  --warn: #e8b04a;
+  --warn-soft: #f3c96f;
+  --warn-dim: #8a6212;
+  --green: #34d399;
+  --red: #f87171;
+  --red-dim: #7f1d1d;
+  --blue: #60a5fa;
+  --ok: #6ec48b;
+  --ok-soft: #8ad9a2;
+  --bad: #e08f8f;
+  --info: #7fb3d5;
+  --wild: #f0abfc;
+  --tint-run: #2a1a4a;
+  --tint-bad: #3a1420;
+  --tint-info: #172554;
+  --tint-ok: #062e24;
+  --tint-idle: #281f35;
+}
+
+:root[data-theme="ocean"] {
+  --bg: #071214;
+  --bg-raise: #0b191c;
+  --bg-panel: #102226;
+  --bg-hover: #172e33;
+  --bg-hover-strong: #1f3a40;
+  --bg-sink: #071214;
+  --bg-sunken: rgba(0, 0, 0, .22);
+  --border: #1b3237;
+  --border-strong: #2c4a50;
+  --border-hover: #3f6168;
+  --text: #ecf8f9;
+  --text-dim: #9fb9bd;
+  --text-faint: #6a8589;
+  --accent: #22d3ee;
+  --accent-soft: #67e8f9;
+  --accent-dim: #0e7490;
+  --on-accent: #04181c;
+  --warn: #e8b04a;
+  --warn-soft: #f3c96f;
+  --warn-dim: #8a6212;
+  --green: #4ade80;
+  --red: #f87171;
+  --red-dim: #7f1d1d;
+  --blue: #60a5fa;
+  --ok: #6ec48b;
+  --ok-soft: #8ad9a2;
+  --bad: #e08f8f;
+  --info: #7fb3d5;
+  --wild: #c58fd6;
+  --tint-run: #073540;
+  --tint-bad: #3a1416;
+  --tint-info: #172554;
+  --tint-ok: #0b3019;
+  --tint-idle: #172e33;
+}
+
+:root[data-theme="ember"] {
+  --bg: #0f0c0a;
+  --bg-raise: #16110e;
+  --bg-panel: #1f1814;
+  --bg-hover: #2b221c;
+  --bg-hover-strong: #372c25;
+  --bg-sink: #0f0c0a;
+  --bg-sunken: rgba(0, 0, 0, .2);
+  --border: #2f2620;
+  --border-strong: #4a3c32;
+  --border-hover: #645246;
+  --text: #faf3ee;
+  --text-dim: #baa99c;
+  --text-faint: #857468;
+  --accent: #fb923c;
+  --accent-soft: #fdba74;
+  --accent-dim: #c2410c;
+  --on-accent: #1f0f04;
+  --warn: #facc15;
+  --warn-soft: #fde047;
+  --warn-dim: #854d0e;
+  --green: #34d399;
+  --red: #f87171;
+  --red-dim: #7f1d1d;
+  --blue: #60a5fa;
+  --ok: #7bbf7b;
+  --ok-soft: #6ec48b;
+  --bad: #d98a8a;
+  --info: #7fb3d5;
+  --wild: #c58fd6;
+  --tint-run: #43200a;
+  --tint-bad: #3f1515;
+  --tint-info: #172554;
+  --tint-ok: #022c22;
+  --tint-idle: #2b221c;
+}
+
+:root[data-theme="rose"] {
+  --bg: #120c0f;
+  --bg-raise: #191115;
+  --bg-panel: #22171c;
+  --bg-hover: #2e2027;
+  --bg-hover-strong: #3a2a32;
+  --bg-sink: #120c0f;
+  --bg-sunken: rgba(0, 0, 0, .22);
+  --border: #33242b;
+  --border-strong: #4d3842;
+  --border-hover: #684d59;
+  --text: #fbf0f4;
+  --text-dim: #c0a7b2;
+  --text-faint: #8a717c;
+  --accent: #f472b6;
+  --accent-soft: #f9a8d4;
+  --accent-dim: #9d2766;
+  --on-accent: #22081a;
+  --warn: #e8b04a;
+  --warn-soft: #f3c96f;
+  --warn-dim: #8a6212;
+  --green: #34d399;
+  --red: #ff6b5b;
+  --red-dim: #7f1d1d;
+  --blue: #60a5fa;
+  --ok: #6ec48b;
+  --ok-soft: #8ad9a2;
+  --bad: #e89a8a;
+  --info: #7fb3d5;
+  --wild: #c58fd6;
+  --tint-run: #4a1030;
+  --tint-bad: #401810;
+  --tint-info: #172554;
+  --tint-ok: #022c22;
+  --tint-idle: #2e2027;
+}
+
+:root[data-theme="nord"] {
+  --bg: #2e3440;
+  --bg-raise: #323846;
+  --bg-panel: #3b4252;
+  --bg-hover: #434c5e;
+  --bg-hover-strong: #4c566a;
+  --bg-sink: #2e3440;
+  --bg-sunken: rgba(0, 0, 0, .14);
+  --border: #434c5e;
+  --border-strong: #4c566a;
+  --border-hover: #616e88;
+  --text: #eceff4;
+  --text-dim: #d8dee9;
+  --text-faint: #9aa3b5;
+  --accent: #88c0d0;
+  --accent-soft: #8fbcbb;
+  --accent-dim: #5e81ac;
+  --on-accent: #2e3440;
+  --warn: #ebcb8b;
+  --warn-soft: #f0d9a8;
+  --warn-dim: #9a7f45;
+  --green: #a3be8c;
+  --red: #bf616a;
+  --red-dim: #6b2f35;
+  --blue: #81a1c1;
+  --ok: #a3be8c;
+  --ok-soft: #b5cf9e;
+  --bad: #d08770;
+  --info: #81a1c1;
+  --wild: #b48ead;
+  --tint-run: #3d4a5c;
+  --tint-bad: #4a3438;
+  --tint-info: #394659;
+  --tint-ok: #3a4a40;
+  --tint-idle: #434c5e;
+}
+
+:root[data-theme="graphite"] {
+  --bg: #0e0e0f;
+  --bg-raise: #141415;
+  --bg-panel: #1b1b1d;
+  --bg-hover: #262628;
+  --bg-hover-strong: #313134;
+  --bg-sink: #0e0e0f;
+  --bg-sunken: rgba(0, 0, 0, .2);
+  --border: #2a2a2d;
+  --border-strong: #414145;
+  --border-hover: #58585d;
+  --text: #f4f4f5;
+  --text-dim: #a6a6ad;
+  --text-faint: #737379;
+  --accent: #e4e4e7;
+  --accent-soft: #fafafa;
+  --accent-dim: #71717a;
+  --on-accent: #111113;
+  --warn: #e8b04a;
+  --warn-soft: #f3c96f;
+  --warn-dim: #8a6212;
+  --green: #34d399;
+  --red: #f87171;
+  --red-dim: #7f1d1d;
+  --blue: #60a5fa;
+  --ok: #7bbf7b;
+  --ok-soft: #6ec48b;
+  --bad: #d98a8a;
+  --info: #7fb3d5;
+  --wild: #c58fd6;
+  --tint-run: #2e2e32;
+  --tint-bad: #3a1616;
+  --tint-info: #172554;
+  --tint-ok: #022c22;
+  --tint-idle: #262628;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #app { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app { display: flex; }
+
+/* ---------- Sidebar ---------- */
+#sidebar {
+  width: 216px; flex: 0 0 216px;
+  background: var(--bg-raise);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  padding: 18px 12px 12px;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 18px; border-bottom: 1px solid var(--border); }
+/* The icon carries its own rounded corners and transparency, so it needs no
+   radius or background of its own. */
+.brand-mark { width: 28px; height: 28px; display: block; flex: 0 0 auto; }
+.brand-name { font-weight: 700; letter-spacing: 0.02em; font-size: 15px; }
+.brand-sub { color: var(--text-faint); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+
+#nav { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; flex: 1; }
+.nav-btn {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px;
+  background: transparent; border: none; border-radius: var(--radius-sm);
+  color: var(--text-dim); font-size: 13.5px; font-weight: 500;
+  cursor: pointer; text-align: left;
+  transition: background 120ms ease, color 120ms ease;
+}
+.nav-btn:hover { background: var(--bg-hover); color: var(--text); }
+.nav-btn.active { background: var(--bg-panel); color: var(--accent-soft); }
+.nav-ico { width: 18px; text-align: center; opacity: 0.9; }
+.nav-badge {
+  margin-left: auto; background: var(--accent); color: var(--on-accent);
+  font-size: 11px; font-weight: 700; border-radius: 999px;
+  min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 5px;
+}
+/* author `display` beats the UA stylesheet's [hidden]{display:none}, so empty
+   badges kept showing "0" — restate it at author level. */
+.nav-badge[hidden] { display: none; }
+.sidebar-foot { border-top: 1px solid var(--border); padding-top: 12px; }
+.worker-pill {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 999px; padding: 7px 12px; font-size: 12px; color: var(--text-dim);
+}
+.worker-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); transition: background 200ms; }
+.worker-pill.running .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.worker-pill.running { color: var(--text); }
+
+/* ---------- Content ---------- */
+#content { flex: 1; overflow: hidden; position: relative; }
+.tab-pane { position: absolute; inset: 0; overflow-y: auto; padding: 26px 30px 40px; display: none; }
+.tab-pane.active { display: block; }
+.tab-pane.fill { padding: 0; overflow: hidden; display: none; flex-direction: column; }
+.tab-pane.fill.active { display: flex; }
+
+.pane-head { margin-bottom: 20px; }
+.pane-head h1 { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; }
+.pane-sub { color: var(--text-faint); font-size: 13px; margin-top: 2px; }
+
+/* ---------- Cards & panels ---------- */
+.card-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.stat-card {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.stat-label { color: var(--text-faint); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; }
+.stat-value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+.stat-hint { color: var(--text-faint); font-size: 12px; margin-top: 2px; }
+.stat-value.ok { color: var(--green); }
+.stat-value.err { color: var(--red); }
+.stat-value.warn { color: var(--warn-soft); }
+
+.panel {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 18px; margin-bottom: 16px;
+}
+.panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 12px; }
+.panel-head h2 { font-size: 14.5px; font-weight: 650; }
+.dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+/* Worker + Activity stacked in one column, so the short Worker panel is not stretched
+   to Auto mode's height. */
+.dash-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.dash-col > .panel { margin-bottom: 0; }
+@media (max-width: 1250px) { .dash-grid { grid-template-columns: 1fr; } }
+
+/* ---------- Buttons ---------- */
+.btn {
+  background: var(--bg-hover); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 7px 14px; font-size: 13px; font-weight: 550; font-family: var(--font);
+  cursor: pointer; transition: background 120ms, border-color 120ms, transform 60ms;
+}
+.btn:hover { background: var(--bg-hover-strong); border-color: var(--border-hover); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 650; }
+.btn.primary:hover { background: var(--accent-soft); border-color: var(--accent-soft); }
+.btn.danger { background: transparent; border-color: var(--red-dim); color: var(--red); }
+.btn.danger:hover { background: var(--red-dim); color: var(--text); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--text-faint); }
+.btn.ghost:hover { color: var(--text); background: var(--bg-hover); }
+.btn.small { padding: 4px 10px; font-size: 12px; }
+.btn-row { display: flex; gap: 8px; align-items: center; }
+
+/* ---------- Forms ---------- */
+.fld { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.fld > span { font-size: 12px; color: var(--text-dim); font-weight: 550; }
+.fld > span em { color: var(--text-faint); font-style: normal; font-weight: 400; }
+.fld.slim { max-width: 110px; }
+.fld-row { display: flex; gap: 12px; align-items: flex-end; }
+/* Opt-out, not opt-in. The old list was `[type=text],[type=number],[type=password]`,
+   which silently missed every `<input>` written without a type attribute — 14 of them on
+   the Settings page alone, each rendering as a raw white box with black text on a dark
+   app. Enumerating the types you want is a rule that breaks every time markup is added. */
+/* The negations sit inside :where() so this stays at plain element specificity. A bare
+   :not() chain would score higher than the old [type=text] selector did and start
+   winning against later overrides like `.card-field input`. */
+input:not(:where([type="checkbox"], [type="radio"], [type="range"], [type="file"])),
+textarea, select {
+  background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  color: var(--text); font-family: var(--font); font-size: 13px;
+  padding: 8px 10px; outline: none; width: 100%;
+  transition: border-color 120ms;
+}
+textarea { resize: vertical; line-height: 1.45; }
+input:focus, textarea:focus, select:focus { border-color: var(--accent-dim); }
+.hint { color: var(--text-faint); font-size: 12.5px; }
+.hint.ok { color: var(--green); }
+.hint.err { color: var(--red); }
+/* Worked, but not fully — a short batch of prompts is the case this exists for. */
+.hint.warn { color: var(--warn); }
+
+/* ---------- Activity log ---------- */
+.activity-log {
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
+  max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px;
+}
+.activity-log .log-line { display: flex; gap: 8px; }
+.activity-log .log-time { color: var(--text-faint); flex: 0 0 auto; }
+.activity-log .log-line.err { color: var(--red); }
+.activity-log .log-line.ok { color: var(--green); }
+.worker-status { color: var(--text-dim); font-size: 13px; }
+
+/* ---------- Prompt queue (Prompt Lab) + shared prompt lists ---------- */
+.queue-add { border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px; }
+.queue-add .btn-row { justify-content: flex-end; margin-top: 8px; }
+.draft-prompts { display: flex; flex-direction: column; gap: 10px; }
+.draft-prompt { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+.draft-prompt textarea { flex: 1; font-size: 12.5px; }
+.draft-prompt .btn { flex: 0 0 auto; }
+/* The generator controls written with this prompt — see renderDraftPrompts. Full width
+   under the textarea, because a dozen name/value pairs do not fit beside it. */
+.draft-prompt .draft-controls { flex: 1 0 100%; margin-top: -4px; }
+.queue-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; }
+.queue-item {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 9px 12px; background: var(--bg-raise);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.queue-item .q-prompt { font-size: 12.5px; color: var(--text-dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.queue-item .q-meta { display: flex; gap: 8px; align-items: center; font-size: 11.5px; color: var(--text-faint); }
+.queue-item.current { border-color: var(--accent-dim); }
+
+/* ---------- Pills & chips ---------- */
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 650; letter-spacing: 0.03em;
+  border-radius: 999px; padding: 2.5px 9px; text-transform: uppercase;
+}
+.pill.queued { background: var(--tint-idle); color: var(--text-dim); }
+.pill.generating, .pill.qc, .pill.metadata, .pill.uploading { background: var(--tint-run); color: var(--accent-soft); }
+.pill.review { background: var(--tint-info); color: var(--blue); }
+.pill.approved { background: var(--tint-ok); color: var(--green); }
+.pill.drafted { background: var(--tint-ok); color: var(--green); }
+.pill.done { background: var(--tint-ok); color: var(--green); }
+.pill.failed, .pill.error, .pill.upload_failed { background: var(--red-dim); color: var(--red); }
+.pill.qc_error { background: var(--tint-bad); color: var(--red); }
+.pill.discarded, .pill.rejected { background: var(--tint-idle); color: var(--text-faint); }
+
+.filter-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+.sort-group { display: flex; align-items: center; gap: 6px; }
+.sort-group label { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.07em; }
+.sort-group select { width: auto; padding: 5px 8px; font-size: 12.5px; }
+#review-actions { margin-bottom: 14px; }
+
+/* keyboard shortcut hint bar above the review grid */
+.keyhint {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  color: var(--text-faint); font-size: 12px; margin-bottom: 16px;
+}
+.keyhint kbd {
+  background: var(--bg-raise); border: 1px solid var(--border-strong);
+  border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px;
+  font-family: inherit; font-size: 11px; font-weight: 650; color: var(--text-dim);
+}
+.chip {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 999px;
+  color: var(--text-dim); font-size: 12.5px; font-weight: 550;
+  padding: 5px 13px; cursor: pointer; transition: all 120ms;
+}
+.chip:hover { color: var(--text); border-color: var(--border-strong); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 650; }
+
+/* ---------- Status rows ---------- */
+.hz-list { display: flex; flex-direction: column; }
+.hz-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 11px 2px; border-bottom: 1px solid var(--border);
+}
+.hz-row:last-child { border-bottom: none; }
+.hz-dot {
+  flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--text-faint); margin-top: 6px;
+}
+.hz-row.ok   .hz-dot { background: var(--green); box-shadow: 0 0 7px color-mix(in srgb, var(--green) 55%, transparent); }
+.hz-row.warn .hz-dot { background: var(--warn); box-shadow: 0 0 7px color-mix(in srgb, var(--warn) 50%, transparent); }
+.hz-row.bad  .hz-dot { background: var(--red); box-shadow: 0 0 7px color-mix(in srgb, var(--red) 50%, transparent); }
+.hz-row.off  .hz-dot { background: var(--text-faint); }
+.hz-row.idle .hz-dot { background: var(--blue); }
+.hz-main { flex: 1; min-width: 0; }
+.hz-label {
+  font-size: 10.5px; color: var(--text-faint); text-transform: uppercase;
+  letter-spacing: 0.09em; font-weight: 650;
+}
+.hz-head { font-size: 13.5px; font-weight: 600; margin-top: 1px; }
+.hz-row.ok   .hz-head { color: var(--green); }
+.hz-row.warn .hz-head { color: var(--warn-soft); }
+.hz-row.bad  .hz-head { color: var(--red); }
+.hz-row.off  .hz-head { color: var(--text-dim); }
+.hz-row.idle .hz-head { color: var(--blue); }
+.hz-detail { font-size: 12.5px; color: var(--text-faint); margin-top: 3px; line-height: 1.45; }
+.hz-actions { flex: 0 0 auto; display: flex; gap: 4px; align-items: center; }
+
+/* compact copy in the sidebar */
+.side-health { margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px; }
+.side-health .hz-row { padding: 3px 0; border: none; gap: 7px; }
+.side-health .hz-dot { width: 7px; height: 7px; margin-top: 5px; }
+.side-health .hz-head {
+  font-size: 11px; font-weight: 500; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.side-health .hz-row.ok .hz-head { color: var(--text-dim); }
+.side-health .hz-row.off .hz-head { color: var(--text-faint); }
+.side-health .hz-row.bad .hz-head { color: var(--red); }
+.side-health .hz-row.warn .hz-head { color: var(--warn-soft); }
+
+/* ---------- Pipeline flow strip ---------- */
+.flow-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.flow-step {
+  flex: 1 1 auto; min-width: 96px; text-align: center; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 8px; background: var(--bg-raise); transition: border-color 120ms, background 120ms;
+}
+.flow-step:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.flow-step .fs-v { font-size: 20px; font-weight: 700; line-height: 1.1; }
+.flow-step .fs-l { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+.flow-step.zero { opacity: 0.45; }
+.flow-step.review:not(.zero) .fs-v { color: var(--blue); }
+.flow-step.approved:not(.zero) .fs-v { color: var(--green); }
+.flow-step.drafted:not(.zero) .fs-v { color: var(--green); }
+.flow-step.qc:not(.zero) .fs-v { color: var(--accent-soft); }
+.flow-step.qc_error:not(.zero) .fs-v,
+.flow-step.upload_failed:not(.zero) .fs-v { color: var(--red); }
+.flow-arrow { color: var(--text-faint); font-size: 16px; flex: 0 0 auto; }
+
+/* ---------- Upscaler strip ---------- */
+.upscale-strip {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: var(--bg-panel); border-bottom: 1px solid var(--border);
+}
+.upscale-strip img { width: 44px; height: 58px; object-fit: cover; border-radius: 6px; background: var(--bg-raise); }
+
+/* What the auto-driver is doing to somebody else's page, in words. A step that stalls has
+   to look different from one that is working, or "waiting for the Upscale button" reads
+   the same as a finished job. */
+.drive-line {
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 5px; font-size: 12px; color: var(--text-faint);
+}
+.drive-line.running { color: var(--accent-soft); }
+.drive-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--accent); box-shadow: 0 0 6px var(--accent);
+  animation: drive-pulse 1.1s ease-in-out infinite;
+}
+@keyframes drive-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* Small inline control in a webview bar (the upscaler's ratio picker). */
+.wv-inline { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.wv-inline select { width: auto; padding: 4px 8px; font-size: 12px; }
+
+/* ---------- Patreon posting deck ---------- */
+/* Two layouts, one deck. With the Patreon page hidden, the deck is the whole pane and the
+   queue sits under it. With the page shown (.pat-split), the composer takes the full height
+   on the left and the deck becomes a sidebar: the composer is where the posting happens, so
+   it is never the part that gets squeezed. (Until 2026-09-23 the deck stacked above the page
+   and, once it grew attach/drag controls, took 530 of 993 px — the editor got what was left.)
+   The deck reflows by its OWN width through a container query, so the same markup works as a
+   wide strip and as a narrow column. */
+.pat-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pat-web { display: none; }
+.pat-side { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#pane-patreon.pat-split .pat-body { flex-direction: row; }
+#pane-patreon.pat-split .pat-web { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+#pane-patreon.pat-split .pat-side {
+  flex: 0 0 clamp(330px, 23vw, 400px); display: block; overflow-y: auto;
+  background: var(--bg-panel); border-left: 1px solid var(--border);
+}
+
+.pat-deck {
+  container: patdeck / inline-size;
+  padding: 18px 20px; background: var(--bg-panel); border-bottom: 1px solid var(--border); flex: 0 0 auto;
+}
+#pane-patreon.pat-split .pat-deck { padding: 14px 16px 16px; }
+.pat-card {
+  display: grid; align-items: start; gap: 4px 22px;
+  grid-template-columns: 140px minmax(0, 1fr) minmax(330px, 380px);
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "thumb head actions" "thumb main actions";
+}
+.pat-thumb {
+  grid-area: thumb; width: 140px; height: 186px; object-fit: cover; cursor: zoom-in;
+  border-radius: 8px; background: var(--bg-raise); border: 1px solid var(--border);
+}
+.pat-head { grid-area: head; min-width: 0; }
+.pat-main { grid-area: main; min-width: 0; }
+.pat-crumb { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.07em; }
+.pat-title { font-size: 19px; font-weight: 650; line-height: 1.3; margin: 5px 0 6px; overflow-wrap: anywhere; }
+.pat-desc {
+  padding: 9px 11px; max-height: 150px; overflow: auto; white-space: pre-wrap;
+  background: var(--bg-raise); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12.5px; color: var(--text-dim); line-height: 1.55;
+}
+.pat-main .note { margin: 8px 0 0; }
+
+/* Narrow (the sidebar, or a small window): thumbnail beside the title, then the text, then
+   the actions — one column, nothing side by side that has to share 350 px. */
+@container patdeck (max-width: 860px) {
+  .pat-card {
+    grid-template-columns: 76px minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas: "thumb head" "main main" "actions actions";
+    gap: 12px 12px;
+  }
+  .pat-thumb { width: 76px; height: 101px; }
+  .pat-head { align-self: center; }
+  .pat-title { font-size: 15.5px; margin-bottom: 0; }
+  .pat-desc { max-height: 132px; font-size: 12px; }
+}
+
+/* The actions, in the order the composer asks for them. */
+.pat-actions { grid-area: actions; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.pat-step {
+  display: flex; align-items: center; gap: 11px; text-align: left; cursor: pointer; width: 100%;
+  padding: 9px 11px; border-radius: 8px; color: var(--text-dim); font-family: var(--font);
+  background: var(--bg-raise); border: 1px solid var(--border);
+  transition: border-color 120ms, background 120ms, color 120ms;
+}
+.pat-step:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-strong); }
+.pat-step.done { color: var(--text-faint); border-style: dashed; }
+.pat-step.done .ps-label { color: var(--green); }
+/* "now" is the one thing on this page you should be looking at. */
+.pat-step.now { border-color: var(--accent); background: var(--bg-hover); color: var(--text); box-shadow: 0 0 0 1px var(--accent-dim); }
+.pat-step.post.now { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.ps-key {
+  flex: 0 0 auto; width: 22px; height: 22px; display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; border-radius: 5px;
+  background: var(--bg-panel); border: 1px solid var(--border-strong); color: var(--text-faint);
+}
+.pat-step.now .ps-key { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.pat-step.post.now .ps-key { background: var(--green); border-color: var(--green); }
+.ps-text { display: flex; flex-direction: column; min-width: 0; }
+.ps-label { font-size: 13px; font-weight: 600; }
+.ps-hint { font-size: 11px; color: var(--text-faint); line-height: 1.4; }
+
+/* Still, GIF or MP4 for this post. It belongs to the card, not to Settings, and it decides
+   what step 1 hands over — so it sits directly above step 1. Name on top, size underneath:
+   a deliberate two-line button instead of a label that wraps wherever the width runs out. */
+.pat-media { display: flex; gap: 6px; }
+.pm-opt {
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 6px 6px 5px; font-family: var(--font); font-size: 12px; font-weight: 600; line-height: 1.25;
+  white-space: nowrap; cursor: pointer; border-radius: 7px; color: var(--text-dim); background: var(--bg-raise);
+  border: 1px solid var(--border); transition: border-color 120ms, background 120ms, color 120ms;
+}
+.pm-size { font-size: 10.5px; font-weight: 500; color: var(--text-faint); }
+.pm-opt:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-strong); }
+.pm-opt.on { border-color: var(--accent); background: var(--bg-hover); color: var(--text); box-shadow: 0 0 0 1px var(--accent-dim); }
+.pm-opt.on .pm-size { color: var(--text-dim); }
+/* 'off' = this card has no GIF yet. Still clickable, because the click is what explains why. */
+.pm-opt.off { opacity: .5; }
+
+/* The other ways to hand the same file over — secondary, so small, and tucked under step 1. */
+.pat-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 3px 12px; }
+.pat-tools .btn { padding: 3px 10px; font-size: 11.5px; }
+.pat-tools [draggable="true"] { cursor: grab; }
+
+/* Attach is waiting for the click on Patreon's upload button. */
+.pat-wait {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+  font-size: 12px; line-height: 1.45; color: var(--text);
+  background: var(--tint-run); border: 1px solid var(--accent-dim);
+}
+.pw-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: drive-pulse 1.1s ease-in-out infinite; }
+.pw-text { flex: 1; min-width: 0; }
+.pat-actions .note { margin: 0; }
+.pat-minor { display: flex; gap: 4px; margin-top: 2px; }
+
+.pat-empty { display: flex; gap: 16px; align-items: center; padding: 12px 0; }
+.pat-empty-mark { font-size: 38px; color: var(--accent-dim); }
+.pat-empty h2 { font-size: 16px; margin-bottom: 3px; }
+.pat-empty p { max-width: 620px; }
+
+.pat-queue-wrap { flex: 1; overflow-y: auto; padding: 16px 20px 26px; }
+.pat-queue-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.pat-queue-head h2 { font-size: 13px; }
+.pat-queue { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 10px; }
+.pat-q {
+  display: flex; flex-direction: column; gap: 6px; padding: 7px; cursor: pointer; text-align: left;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim);
+}
+.pat-q:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.pat-q.on { border-color: var(--accent); color: var(--text); }
+.pat-q img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 5px; background: var(--bg-raise); }
+.pq-title { font-size: 11.5px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* In the sidebar the queue is a strip of thumbnails; the deck above already names the card. */
+#pane-patreon.pat-split .pat-queue-wrap { overflow: visible; padding: 12px 16px 20px; }
+#pane-patreon.pat-split .pat-queue { grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 8px; }
+#pane-patreon.pat-split .pat-q { padding: 4px; }
+#pane-patreon.pat-split .pq-title { display: none; }
+
+/* ---------- Pixiv tab ----------
+   A session tab like the DeviantArt one: bar, a diagnostics fold, then the live page. There
+   is no deck and no queue — publishing lives in the Drafts tab beside DeviantArt. The
+   webview is never hidden here, because it is what performs the upload. */
+.px-diag { flex: 0 0 auto; margin: 0; padding: 0 20px 8px; background: var(--bg-raise); border-bottom: 1px solid var(--border); }
+.px-pre {
+  margin: 5px 0 9px; padding: 8px 10px; max-height: 160px; overflow: auto;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+}
+
+/* The staged-card banner on the Pixiv tab. Accented rather than quiet: it is the only
+   thing on that tab saying the form below is already filled in and whose picture it is,
+   and it is read at the moment the person arrives from Drafts. */
+.px-staged {
+  flex: 0 0 auto; padding: 10px 20px 11px; background: var(--bg-raise);
+  border-bottom: 1px solid var(--border); border-left: 3px solid var(--accent);
+  font-size: 12.5px; line-height: 1.5;
+}
+.px-staged .hint { margin-top: 3px; }
+.px-staged .btn-row { margin-top: 7px; }
+
+/* Per-site state on a Drafts row: what has landed, what is still owed, what refused. */
+.d-sites { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 5px; }
+.site-chip {
+  font-size: 10.5px; padding: 2px 7px; border-radius: 20px; white-space: nowrap;
+  color: var(--text-faint); background: var(--bg-raise); border: 1px solid var(--border);
+}
+.site-chip.ok { color: var(--ok); border-color: currentColor; }
+.site-chip.bad { color: var(--bad); border-color: currentColor; }
+
+/* ---------- Destination picker (Review card) ---------- */
+.dest-row { display: flex; gap: 6px; }
+.dest-btn {
+  flex: 1; padding: 6px 8px; font-size: 12px; font-weight: 550; cursor: pointer;
+  background: var(--bg-raise); color: var(--text-faint);
+  border: 1px solid var(--border); border-radius: 6px;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.dest-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.dest-btn.on { background: var(--bg-hover); color: var(--accent-soft); border-color: var(--accent-dim); }
+.dest-btn:disabled { opacity: 0.5; cursor: default; }
+.dest-note { margin-top: 4px; font-size: 11px; }
+
+/* ---------- Review grid ---------- */
+.review-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.review-card {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; display: flex; flex-direction: column;
+  scroll-margin: 24px;
+  /* The second half of the Review speed fix — app.js only builds a page of cards at a
+     time, and this stops the ones it has built from being laid out while off screen.
+     contain-intrinsic-size is the placeholder height so the scrollbar stays honest and
+     does not jump as cards come into view; it is roughly one card at the 320px column. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 620px;
+}
+/* keyboard cursor — which card A/R/E/U will act on */
+.review-card.cursor {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 8px 24px rgba(0, 0, 0, .45);
+}
+.review-card img.card-img {
+  width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block;
+  background: var(--bg-raise); cursor: zoom-in;
+}
+.review-card video.card-video {
+  width: 100%; display: block; background: #000;
+  border-top: 1px solid var(--border);
+}
+.review-card .card-video-toggle { width: 100%; border-radius: 0; border-top: 1px solid var(--border); justify-content: center; }
+/* The GIF of that clip (auto-GIF switch, or the card's Save as GIF button) — same
+   full-bleed treatment as the video so the pair reads as one media block. */
+.review-card img.card-gif {
+  width: 100%; display: block; background: #000;
+  border-top: 1px solid var(--border);
+}
+.review-tail { margin-top: 14px; text-align: center; padding: 10px 0 22px; }
+.card-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.qc-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qc-score { font-weight: 750; font-size: 15px; }
+.qc-score.good { color: var(--green); }
+.qc-score.bad { color: var(--red); }
+.qc-defects { font-size: 11.5px; color: var(--text-faint); }
+/* QC v3 detail: the region verdicts, then the one-line fix. New signal — v2 could only
+   ever say what was wrong, never what came back clean or what to change. */
+.qc-detail { display: flex; flex-direction: column; gap: 3px; margin: 1px 0 4px; }
+.qc-regions { display: flex; flex-wrap: wrap; gap: 4px; }
+.qc-regions .rg { font-style: normal; font-size: 10.5px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--border); color: var(--text-faint); }
+.qc-regions .rg.ok { color: var(--green); }
+.qc-regions .rg.bad { color: var(--red); }
+.qc-fix { font-size: 11.5px; color: var(--text-faint); font-style: italic; }
+/* QC v4: what the inspection counted on each hand, and why the score is not the number the
+   inspector returned. The cap row is deliberately the loudest thing in the detail block —
+   a downgraded card has to look downgraded ON PURPOSE rather than look like a bad score. */
+.qc-fingers { display: flex; flex-wrap: wrap; gap: 4px; }
+.qc-fingers .rg { font-style: normal; font-size: 10.5px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--border); color: var(--text-faint); }
+.qc-fingers .rg.ok { color: var(--green); }
+.qc-fingers .rg.bad { color: var(--red); border-color: var(--red); }
+.qc-caps { display: flex; flex-wrap: wrap; gap: 4px; }
+/* The Overseer's self-check of a clip: one chip per check, hover for the evidence. */
+.video-check { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 10px 0; font-size: 11px; color: var(--text-dim); }
+.video-check .rg { font-style: normal; font-size: 10.5px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--border); color: var(--text-faint); }
+.video-check .rg.ok { color: var(--green); }
+.video-check .rg.bad { color: var(--red); border-color: var(--red); }
+.qc-caps .qc-cap { font-style: normal; font-size: 10.5px; padding: 0 5px; border-radius: 3px; border: 1px dashed var(--warn); color: var(--warn); }
+.card-field label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.07em; display: block; margin-bottom: 3px; }
+.card-field input, .card-field textarea { font-size: 12.5px; padding: 6px 8px; }
+.card-field .footer-line { margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--border); font-style: italic; }
+.card-tags { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+/* The action row is anchored to the bottom of the card, not left to float wherever the
+   text above it happens to end.
+   Grid stretches every card in a row to the tallest one, and that slack used to collect
+   under the prompt — so two identical cards could have Reject at different heights, and
+   rejecting one moved the target out from under the pointer. With the slack above the
+   actions instead, every card in a row has its buttons on the same line and the card that
+   slides up after a rejection arrives under the mouse. */
+.review-card .card-body { flex: 1 1 auto; }
+.card-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; flex-wrap: wrap; }
+.card-actions .btn { flex: 1 1 auto; }
+.card-prompt { font-size: 11px; color: var(--text-faint); border-top: 1px solid var(--border); padding-top: 8px; max-height: 54px; overflow: hidden; }
+
+/* ---------- Drafts ---------- */
+.drafts-list { display: flex; flex-direction: column; gap: 10px; }
+.draft-row {
+  display: flex; gap: 14px; align-items: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; background: var(--bg-raise);
+}
+.draft-row img { width: 64px; height: 84px; object-fit: cover; border-radius: 4px; flex: 0 0 auto; }
+.draft-row .d-info { flex: 1; min-width: 0; }
+.draft-row .d-title { font-weight: 600; font-size: 13.5px; }
+.draft-row .d-sub { color: var(--text-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draft-row .d-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+a { color: var(--accent-soft); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---------- Webview panes ---------- */
+.webview-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--bg-raise); border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.wv-title { font-size: 12.5px; color: var(--text-dim); font-weight: 550; }
+webview { flex: 1; width: 100%; background: #fff; }
+/* The `hidden` attribute does not hide a <webview>: Electron gives the tag its own
+   `display: flex` in a built-in stylesheet, which outranks the UA rule for [hidden]. Without
+   this, "Show Patreon page" toggles a button label while the page stays on screen. */
+webview[hidden] { display: none !important; }
+
+/* ---------- Settings ----------
+   Index on the left, one section at a time on the right. The whole page used to be on
+   screen at once in a two-column grid, which reads as a wall and hides the one field
+   that is wrong. Search spans every section — see applySettingsSearch. */
+/* Mirrors the .fill pattern: leave `display` alone so the pane still hides when
+   inactive, and only promote it to a flex column once .active is on. */
+#pane-settings { flex-direction: column; overflow: hidden; }
+#pane-settings.active { display: flex; }
+.set-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+
+.set-search { position: relative; display: flex; align-items: center; gap: 10px; }
+.set-search-ico {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--text-faint); font-size: 15px; pointer-events: none;
+}
+.set-search input {
+  width: 330px; padding-left: 30px; background: var(--bg-panel);
+}
+.set-search input::-webkit-search-cancel-button { filter: invert(0.6); cursor: pointer; }
+.set-search .hint { white-space: nowrap; }
+
+.settings-shell {
+  flex: 1; min-height: 0; display: grid; grid-template-columns: 236px 1fr;
+  gap: 24px; margin-top: 18px;
+}
+@media (max-width: 1000px) { .settings-shell { grid-template-columns: 1fr; } }
+
+.settings-nav { display: flex; flex-direction: column; gap: 2px; align-self: start; position: sticky; top: 0; }
+.set-nav-btn {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 9px 11px; background: transparent; border: 1px solid transparent;
+  border-radius: var(--radius-sm); color: var(--text-dim);
+  font-family: var(--font); font-size: 13px; cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.set-nav-btn:hover { background: var(--bg-hover); color: var(--text); }
+.set-nav-btn.active {
+  background: var(--bg-panel); border-color: var(--border-strong); color: var(--accent-soft);
+}
+.sn-ico { flex: 0 0 auto; width: 16px; text-align: center; font-size: 13px; opacity: 0.85; }
+.sn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sn-label { font-weight: 600; }
+.sn-blurb {
+  font-size: 11px; color: var(--text-faint); margin-top: 1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.set-nav-btn.active .sn-blurb { color: var(--text-dim); }
+.sn-count:not(:empty) {
+  flex: 0 0 auto; background: var(--accent); color: var(--on-accent); font-size: 10.5px;
+  font-weight: 700; border-radius: 999px; padding: 1px 6px;
+}
+
+.settings-body { overflow-y: auto; padding-right: 6px; padding-bottom: 40px; }
+.settings-body .set-sec { display: none; max-width: 780px; }
+.settings-body .set-sec.active { display: block; }
+/* While searching, every section is on screen and the misses are removed instead. */
+.settings-body.searching .set-sec { display: block; }
+.settings-body.searching .set-sec.nomatch,
+.settings-body.searching .panel.nomatch { display: none; }
+.set-sec-head { margin-bottom: 14px; }
+.set-sec-head h2 { font-size: 17px; font-weight: 650; }
+.set-sec-head p { font-size: 12.5px; color: var(--text-faint); margin-top: 2px; }
+/* Text panels stay at a readable measure; only the ones that own a table or a grid
+   (providers, routing) are allowed to use the whole width. */
+.settings-body .set-sec > .panel { margin-bottom: 16px; max-width: 720px; }
+.settings-body .set-sec > .panel.wide { max-width: none; }
+.settings-body .panel h3 {
+  font-size: 13px; color: var(--accent-soft); text-transform: uppercase;
+  letter-spacing: 0.09em; display: flex; align-items: center; gap: 8px;
+}
+.p-tag {
+  text-transform: none; letter-spacing: 0; font-size: 10.5px; font-weight: 600;
+  color: var(--text-faint); border: 1px solid var(--border-strong);
+  border-radius: 999px; padding: 1px 7px;
+}
+.panel-sub { font-size: 12.5px; color: var(--text-dim); margin: 5px 0 14px; line-height: 1.5; }
+
+/* Explanations recede without disappearing: same words, less shouting. */
+.note {
+  font-size: 12px; color: var(--text-faint); line-height: 1.55;
+  border-left: 2px solid var(--border-strong); padding: 2px 0 2px 10px;
+  margin: 8px 0 12px;
+}
+.note.warn { border-left-color: var(--warn-dim); color: var(--text-dim); }
+.note b { color: var(--text-dim); font-weight: 600; }
+.c-idle { color: var(--blue); font-weight: 600; }
+.c-warn { color: var(--warn-soft); font-weight: 600; }
+.c-bad  { color: var(--red); font-weight: 600; }
+
+details.fold { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+details.fold > summary {
+  cursor: pointer; font-size: 12.5px; color: var(--text-dim); font-weight: 550;
+  list-style: none; display: flex; align-items: center; gap: 6px;
+}
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::before { content: '▸'; color: var(--text-faint); font-size: 10px; }
+details.fold[open] > summary::before { content: '▾'; }
+details.fold > summary em { color: var(--text-faint); font-style: normal; font-weight: 400; }
+details.fold > summary:hover { color: var(--text); }
+details.fold > *:not(summary) { margin-top: 10px; }
+
+.path-row {
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px 10px; word-break: break-all;
+}
+
+.checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.checkbox-row input { accent-color: var(--accent); width: 15px; height: 15px; }
+.checkbox-row span { font-size: 13px; color: var(--text-dim); }
+
+/* ---------- Prompt Lab ---------- */
+.lab-grid { display: grid; grid-template-columns: 460px 1fr; gap: 16px; }
+@media (max-width: 1250px) { .lab-grid { grid-template-columns: 1fr; } }
+.skel-list { display: flex; flex-direction: column; gap: 6px; }
+.skel-row { display: flex; gap: 10px; font-size: 12.5px; align-items: baseline; }
+.skel-row .k {
+  flex: 0 0 108px; color: var(--text-faint); font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.07em;
+}
+.skel-row .v { color: var(--text-dim); flex: 1; }
+.skel-row.empty .v { color: var(--red); }
+.lab-result { display: flex; gap: 10px; align-items: flex-start; }
+.lab-result textarea { flex: 1; font-size: 12.5px; }
+.lab-result .lab-btns { display: flex; flex-direction: column; gap: 4px; flex: 0 0 auto; }
+.bank-row {
+  display: flex; gap: 12px; align-items: flex-start;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; background: var(--bg-raise);
+}
+.bank-row .b-text { flex: 1; font-size: 12.5px; color: var(--text-dim); }
+.bank-row .b-meta { color: var(--text-faint); font-size: 11px; margin-bottom: 3px; }
+
+/* ---------- Prompt Lab · image references ---------- */
+.ref-strip { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; margin-top: 12px; }
+.ref-thumb {
+  position: relative; width: 96px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-raise);
+}
+.ref-thumb img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; cursor: zoom-in; }
+.ref-thumb .ref-badge {
+  font-size: 10.5px; text-align: center; padding: 3px 4px; color: var(--text-faint);
+  background: var(--bg-panel); border-top: 1px solid var(--border);
+}
+.ref-thumb.read { border-color: var(--accent-dim); }
+.ref-thumb.read .ref-badge { color: var(--green); }
+.ref-thumb.reading .ref-badge { color: var(--accent-soft); }
+.ref-thumb.error { border-color: var(--red-dim); }
+.ref-thumb.error .ref-badge { color: var(--red); }
+.ref-thumb .btn { position: absolute; top: 2px; right: 2px; padding: 1px 6px; background: color-mix(in srgb, var(--bg) 72%, transparent); }
+.ref-brief {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; background: var(--bg-raise); margin-bottom: 8px;
+}
+.ref-brief .rb-head { font-size: 12.5px; font-weight: 600; margin-bottom: 6px; }
+.ref-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+.ref-pick { position: relative; border: 2px solid transparent; border-radius: var(--radius-sm); overflow: hidden; cursor: pointer; }
+.ref-pick img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; background: var(--bg-raise); }
+.ref-pick .rp-meta {
+  position: absolute; left: 0; right: 0; bottom: 0; font-size: 11px; text-align: center;
+  background: color-mix(in srgb, var(--bg) 78%, transparent); color: var(--text-dim); padding: 2px 0;
+}
+.ref-pick.on { border-color: var(--accent); }
+.ref-pick.on .rp-meta { background: var(--accent); color: var(--on-accent); font-weight: 650; }
+
+/* ---------- Providers & routing ---------- */
+.settings-body .set-sec:has(> .panel.wide) { max-width: 980px; }
+.prov-list { display: flex; flex-direction: column; gap: 12px; }
+.prov-row {
+  border: 1px solid var(--border); border-left: 3px solid var(--accent-dim);
+  border-radius: var(--radius-sm); padding: 12px 14px; background: var(--bg-raise);
+}
+.prov-row.off { border-left-color: var(--border-strong); opacity: 0.72; }
+/* A subscription command is a different kind of thing from an endpoint — it costs nothing
+   per call and it can be signed out. Worth telling apart at a glance in a long list. */
+.prov-row.cli { border-left-color: var(--green); }
+.prov-row.cli.off { border-left-color: var(--border-strong); }
+/* Raw stdout from a tested command. Wrapped and capped: the useful part is the first few
+   lines, and an agent CLI can print a screenful of banner before it. */
+.raw-out {
+  margin-top: 6px; padding: 8px 10px; max-height: 220px; overflow: auto;
+  background: var(--bg-sink); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-family: var(--mono); font-size: 11px;
+  white-space: pre-wrap; word-break: break-word; color: var(--text-dim);
+}
+.prov-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.prov-head .prov-name { flex: 0 0 190px; font-weight: 600; }
+.prov-state { flex: 1; font-size: 11.5px; color: var(--text-faint); }
+.prov-state.ok { color: var(--green); }
+.prov-flag { display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--text-dim); white-space: nowrap; }
+.prov-flag input { accent-color: var(--accent); width: 14px; height: 14px; }
+.fld > span em.warn { color: var(--red); font-style: normal; font-weight: 650; }
+.route-block { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.route-block h4 {
+  font-size: 11.5px; color: var(--accent-soft); text-transform: uppercase;
+  letter-spacing: 0.08em; margin-bottom: 4px; font-weight: 650;
+}
+.route-row {
+  display: flex; align-items: center; gap: 10px; padding: 5px 0;
+  border-bottom: 1px solid var(--border); font-size: 12.5px;
+}
+.route-row:last-child { border-bottom: none; }
+.route-row .route-pos { flex: 0 0 22px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.route-row .route-name { flex: 0 0 210px; color: var(--text); }
+.route-row .route-model { flex: 1; color: var(--text-dim); font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-row.dead .route-name, .route-row.dead .route-model { color: var(--text-faint); }
+.route-row.dead .route-model { font-family: var(--font); font-style: italic; }
+
+/* ---------- Title variety ---------- */
+.title-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.ts-cell {
+  flex: 1 1 130px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--bg-raise);
+}
+.ts-cell b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; color: var(--text); }
+.ts-cell span { font-size: 11px; color: var(--text-faint); line-height: 1.35; display: block; margin-top: 2px; }
+.ts-cell.warn { border-color: var(--warn-dim); }
+.ts-cell.warn b { color: var(--warn); }
+.dup-row {
+  display: flex; align-items: center; gap: 8px; padding: 4px 0;
+  border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.dup-row:last-child { border-bottom: none; }
+.dup-score { flex: 0 0 34px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.dup-vs { color: var(--text-faint); font-style: italic; }
+/* A reference that knows the prompt behind it is a materially better reference, so it is
+   marked in the strip rather than only in the tooltip — the difference decides whether a
+   Recreate run is reconstruction or transcription. */
+.ref-thumb.has-prompt { border-color: var(--accent); }
+.ref-thumb.has-prompt .ref-badge { color: var(--accent-soft); }
+.ref-perf {
+  position: absolute; top: 2px; left: 2px; font-size: 10px; padding: 1px 5px;
+  border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bg) 72%, transparent); color: var(--text-dim);
+  font-variant-numeric: tabular-nums; pointer-events: none;
+}
+/* The DeviantArt picker carries a title under each thumbnail. Without it the grid is 160
+   near-identical anime thumbnails and picking "the one that did well" means guessing.
+   The per-day figure has to move off the card's bottom edge to make room for it. */
+.da-picker { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); }
+.da-picker .ref-pick { display: flex; flex-direction: column; background: var(--bg-raise); }
+.da-picker .rp-meta { position: static; background: color-mix(in srgb, var(--bg) 50%, transparent); }
+.da-picker .rp-title {
+  font-size: 10px; line-height: 1.3; color: var(--text-dim); padding: 3px 5px 4px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.da-picker .rp-noimg {
+  display: flex; align-items: center; justify-content: center; aspect-ratio: 3/4;
+  font-size: 11px; color: var(--text-faint); background: var(--bg-panel);
+}
+.rp-known { color: var(--accent); font-weight: 600; }
+/* Learned title voice. The before/after columns are coloured against each other on
+   purpose: the panel's whole job is to make the difference between what the machine
+   writes and what the artist ships legible at a glance. */
+.rename-was { color: var(--text-faint); text-decoration: line-through; flex: 1 1 0; min-width: 0; }
+.rename-is { color: var(--text); flex: 1 1 0; min-width: 0; }
+.style-preview {
+  white-space: pre-wrap; font-size: 11px; line-height: 1.5; margin: 8px 0 0;
+  padding: 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-sunken); color: var(--text-dim); overflow-x: auto;
+}
+/* The title field and its re-roll button share a line — the button is an alternative to
+   typing in the field next to it, so putting it down with the card actions hid it. */
+.title-row { display: flex; gap: 8px; align-items: center; }
+.title-row input { flex: 1; min-width: 0; }
+.title-row .btn { white-space: nowrap; flex: 0 0 auto; }
+
+/* ---------- Statistics ---------- */
+.break-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.break-col h4 {
+  font-size: 11.5px; color: var(--accent-soft); text-transform: uppercase;
+  letter-spacing: 0.08em; margin-bottom: 8px; font-weight: 650;
+}
+.lift-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12.5px; }
+.lift-row .l-key { flex: 1; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lift-row .l-n { color: var(--text-faint); font-size: 11px; flex: 0 0 auto; }
+.lift-bar { flex: 0 0 84px; height: 6px; background: var(--bg-hover); border-radius: 3px; overflow: hidden; position: relative; }
+.lift-bar i { position: absolute; inset: 0 auto 0 0; display: block; background: var(--green); border-radius: 3px; }
+.lift-bar.down i { background: var(--red); }
+.lift-val { flex: 0 0 46px; text-align: right; font-weight: 650; font-size: 12px; }
+.lift-val.up { color: var(--green); }
+.lift-val.down { color: var(--red); }
+
+.perf-row {
+  display: flex; gap: 12px; align-items: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 9px 12px; background: var(--bg-raise);
+}
+.perf-row img { width: 48px; height: 62px; object-fit: cover; border-radius: 4px; flex: 0 0 auto; background: var(--bg-hover); }
+.perf-row .p-info { flex: 1; min-width: 0; }
+.perf-row .p-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.perf-row .p-sub { color: var(--text-faint); font-size: 11.5px; }
+.perf-row .p-note { color: var(--text-dim); font-size: 11.5px; margin-top: 4px; border-left: 2px solid var(--accent-dim); padding-left: 8px; }
+.perf-row .p-metric { flex: 0 0 auto; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.perf-row .p-metric b { font-size: 15px; color: var(--accent-soft); }
+.perf-row .p-metric span { display: block; color: var(--text-faint); font-size: 11px; }
+
+.lesson { display: flex; gap: 9px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.lesson:last-child { border-bottom: none; }
+.lesson .l-dot { color: var(--accent); flex: 0 0 auto; }
+.lesson .l-text { font-size: 12.5px; color: var(--text); }
+.lesson .l-why { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.lesson.low .l-dot { color: var(--text-faint); }
+
+.stat-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.stat-table th {
+  text-align: left; color: var(--text-faint); font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  padding: 6px 8px; border-bottom: 1px solid var(--border);
+}
+.stat-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+.stat-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.stat-table tr:hover td { background: var(--bg-hover); }
+.stat-table .t-title { color: var(--text); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tbl-wrap { max-height: 460px; overflow-y: auto; }
+.tbl-more {
+  display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 0 2px;
+}
+/* Statistics is a stack of tall panels and only the top one is ever on screen. Skipping
+   layout for the rest is most of what made the tab slow to open — the compute behind it
+   measures at 21 ms, which was never the problem. Scoped to this pane rather than to
+   .panel everywhere: Settings measures its own heights. */
+#pane-stats > .panel, #pane-stats > .dash-grid > .panel {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 340px;
+}
+.src-badge {
+  display: inline-block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+  border-radius: 999px; padding: 2px 8px; font-weight: 650;
+  background: var(--tint-info); color: var(--blue);
+}
+.src-badge.deviantart { background: var(--tint-ok); color: var(--green); }
+.src-badge.none { background: var(--tint-idle); color: var(--text-faint); }
+.src-badge.keeper { background: var(--tint-ok); color: var(--accent-soft); }
+
+/* ---------- Modal & toast ---------- */
+#modal-root { position: fixed; inset: 0; pointer-events: none; z-index: 50; }
+.modal-backdrop {
+  position: absolute; inset: 0; background: color-mix(in srgb, var(--bg) 85%, transparent);
+  display: flex; align-items: center; justify-content: center; pointer-events: auto;
+}
+.modal-img { max-width: 92vw; max-height: 92vh; border-radius: var(--radius); border: 1px solid var(--border-strong); }
+#toast-root { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
+.toast {
+  background: var(--bg-panel); border: 1px solid var(--border-strong); border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm); padding: 10px 16px; font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  animation: toast-in 160ms ease-out;
+  max-width: 380px;
+}
+.toast.err { border-left-color: var(--red); }
+.toast.ok { border-left-color: var(--green); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Scrollbars ---------- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-hover-strong); border-radius: 5px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+
+/* ---------- V1.2 additions ---------- */
+
+/* Review live search */
+#review-search {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text); padding: 6px 10px; font-size: 13px; width: 230px;
+  font-family: var(--font);
+}
+#review-search:focus { outline: none; border-color: var(--accent-dim); }
+#review-search::placeholder { color: var(--text-faint); }
+
+/* Zoom browser: image + caption + prev/next, all inside the backdrop */
+.modal-stage { display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
+.modal-stage .modal-img { pointer-events: auto; max-height: 86vh; }
+.modal-caption {
+  pointer-events: auto; background: var(--bg-panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); padding: 6px 14px; font-size: 13px; color: var(--text-dim);
+  max-width: 80vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.modal-caption .ok { color: var(--green); }
+.modal-nav {
+  pointer-events: auto; position: fixed; top: 50%; transform: translateY(-50%);
+  width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--border-strong);
+  background: var(--bg-panel); color: var(--text); font-size: 26px; line-height: 1;
+  cursor: pointer; z-index: 55;
+}
+.modal-nav:hover { background: var(--bg-hover); border-color: var(--accent-dim); }
+.modal-nav.prev { left: 26px; }
+.modal-nav.next { right: 26px; }
+
+/* Ask dialog (the window.prompt replacement) */
+.ask-panel { max-width: 460px; margin: 0; pointer-events: auto; }
+
+/* Velocity / trend markers on the Statistics tab */
+.trend { color: var(--text-faint); }
+.trend.up { color: var(--green); font-weight: 600; }
+
+/* ============================================================================
+   Prompt archive — "what made this published deviation" (see origins.js)
+   ========================================================================== */
+#archive-search {
+  background: var(--bg-raise); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); color: var(--text);
+  padding: 6px 10px; font-size: 12.5px; min-width: 300px;
+}
+#archive-search:focus { outline: none; border-color: var(--accent-dim); }
+#archive-search::placeholder { color: var(--text-faint); }
+
+.archive-list { max-height: 520px; overflow-y: auto; margin-top: 10px; }
+.archive-row {
+  display: flex; gap: 12px; align-items: center;
+  padding: 8px; border-bottom: 1px solid var(--border);
+  cursor: pointer; border-radius: var(--radius-sm);
+}
+.archive-row:hover { background: var(--bg-hover); }
+.archive-row:last-child { border-bottom: none; }
+.archive-row > img {
+  width: 46px; height: 60px; object-fit: cover; border-radius: 4px;
+  flex: 0 0 auto; background: var(--bg-hover);
+}
+.arch-nothumb {
+  width: 46px; height: 60px; flex: 0 0 auto; border-radius: 4px;
+  background: var(--bg-hover); color: var(--text-faint);
+  display: flex; align-items: center; justify-content: center; font-size: 18px;
+}
+.arch-nothumb.big { width: 100%; height: 260px; font-size: 40px; }
+.arch-main { flex: 1; min-width: 0; }
+.arch-title {
+  font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.arch-prompt {
+  color: var(--text-faint); font-size: 11.5px; margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.arch-meta {
+  flex: 0 0 auto; text-align: right; color: var(--text-faint); font-size: 11.5px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+
+/* The per-deviation modal */
+.origin-panel { max-width: 940px; width: 92vw; margin: 0; pointer-events: auto; max-height: 90vh; overflow-y: auto; }
+.origin-body { display: grid; grid-template-columns: 300px 1fr; gap: 18px; }
+@media (max-width: 900px) { .origin-body { grid-template-columns: 1fr; } }
+.origin-art img { width: 100%; border-radius: var(--radius-sm); border: 1px solid var(--border); display: block; }
+.origin-stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; font-size: 11.5px; color: var(--text-faint); }
+.origin-stats b { color: var(--text); font-size: 13px; }
+.origin-tier {
+  font-size: 12px; color: var(--text-dim); border-left: 3px solid var(--border-strong);
+  padding: 5px 10px; margin-bottom: 12px; background: var(--bg-raise); border-radius: 0 4px 4px 0;
+}
+.origin-tier.ok { border-left-color: var(--green); }
+.origin-tier.warn { border-left-color: var(--warn); color: var(--warn-soft); }
+.origin-tier.dim { border-left-color: var(--text-faint); }
+.origin-panel textarea { font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+.origin-facts { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: var(--text-faint); margin-bottom: 8px; }
+.origin-facts b { color: var(--text-dim); font-weight: 600; }
+.origin-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.origin-tags span { background: var(--bg-hover); color: var(--text-dim); font-size: 11px; padding: 2px 7px; border-radius: 999px; }
+.origin-actions { margin-top: 16px; flex-wrap: wrap; }
+.origin-candidate {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 10px 12px; margin: 10px 0;
+}
+.origin-candidate .cand-title { font-weight: 600; font-size: 13px; margin: 4px 0; }
+.origin-candidate .cand-prompt { color: var(--text-faint); font-size: 11.5px; margin-bottom: 8px; }
+
+.pick-panel { max-width: 860px; width: 90vw; margin: 0; pointer-events: auto; max-height: 88vh; overflow-y: auto; }
+.pick-panel input[type="search"] {
+  width: 100%; background: var(--bg-raise); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); color: var(--text); padding: 8px 12px; font-size: 13px;
+}
+.pick-panel input[type="search"]:focus { outline: none; border-color: var(--accent-dim); }
+
+/* ============================================================================
+   Teaser composer
+
+   The preview is the point, so it gets the room: controls are a fixed column and
+   the canvas takes whatever is left, centred, never larger than its own pixels.
+   ========================================================================== */
+.teaser-panel { max-width: 940px; width: 92vw; margin: 0; pointer-events: auto; max-height: 90vh; overflow-y: auto; }
+.teaser-body { display: grid; grid-template-columns: 1fr 300px; gap: 18px; align-items: start; }
+@media (max-width: 900px) { .teaser-body { grid-template-columns: 1fr; } }
+.teaser-preview {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px; min-height: 260px;
+}
+.teaser-preview canvas { max-width: 100%; max-height: 62vh; border-radius: 3px; display: block; }
+.teaser-controls { display: flex; flex-direction: column; gap: 12px; }
+.teaser-row { display: grid; grid-template-columns: 62px 1fr 44px; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); }
+.teaser-row output { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
+.teaser-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
+.teaser-field input, .teaser-field select {
+  background: var(--bg-raise); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  color: var(--text); padding: 7px 10px; font-size: 13px;
+}
+.teaser-field input:focus, .teaser-field select:focus { outline: none; border-color: var(--accent-dim); }
+
+/* ============================================================================
+   Continuations
+   ========================================================================== */
+.cont-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 1250px) { .cont-grid { grid-template-columns: 1fr; } }
+.cont-source { min-height: 90px; }
+.cont-src-card { display: flex; gap: 14px; }
+.cont-src-card > img {
+  width: 120px; height: 160px; object-fit: cover; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); flex: 0 0 auto;
+}
+.cont-src-info { flex: 1; min-width: 0; }
+.cont-src-title { font-weight: 650; font-size: 14px; margin-bottom: 4px; }
+.cont-src-prompt {
+  color: var(--text-dim); font-size: 12px; line-height: 1.45; margin-top: 6px;
+  border-left: 2px solid var(--accent-dim); padding-left: 9px;
+}
+.cont-comments { max-height: 300px; overflow-y: auto; margin-top: 10px; }
+.cont-comment { border-bottom: 1px solid var(--border); padding: 8px 0; }
+.cont-comment:last-child { border-bottom: none; }
+.cont-comment.wanted { border-left: 2px solid var(--accent); padding-left: 9px; }
+.cc-head { display: flex; align-items: center; gap: 7px; font-size: 12px; margin-bottom: 3px; }
+.cc-text { font-size: 12.5px; color: var(--text-dim); line-height: 1.45; white-space: pre-wrap; }
+.cont-sheet { margin-bottom: 12px; }
+.cont-sheet summary { cursor: pointer; font-size: 12px; color: var(--text-dim); }
+.cont-sheet pre {
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
+  background: var(--bg-raise); border-radius: var(--radius-sm); padding: 10px;
+  margin-top: 8px; white-space: pre-wrap;
+}
+.cont-req { border-bottom: 1px solid var(--border); padding: 10px 0; }
+.cont-req:last-child { border-bottom: none; }
+.cr-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.cr-text { font-size: 12.5px; color: var(--text-dim); font-style: italic; line-height: 1.45; }
+.checkbox-row.disabled { opacity: 0.5; }
+
+/* ============================================================================
+   Comics
+   ========================================================================== */
+.comic-shell { display: grid; grid-template-columns: 250px 1fr; gap: 18px; align-items: start; }
+@media (max-width: 1150px) { .comic-shell { grid-template-columns: 1fr; } }
+.comic-rail {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px; position: sticky; top: 0; max-height: calc(100vh - 120px); overflow-y: auto;
+}
+.comic-projects { display: flex; flex-direction: column; gap: 6px; }
+.comic-proj {
+  display: flex; gap: 9px; align-items: center; padding: 7px;
+  border-radius: var(--radius-sm); cursor: pointer; border: 1px solid transparent;
+}
+.comic-proj:hover { background: var(--bg-hover); }
+.comic-proj.on { background: var(--bg-hover); border-color: var(--accent-dim); }
+.comic-proj > img, .comic-proj .arch-nothumb { width: 38px; height: 48px; object-fit: cover; border-radius: 4px; flex: 0 0 auto; }
+.cp-info { min-width: 0; }
+.cp-name {
+  font-size: 12.5px; font-weight: 600; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.comic-work { min-width: 0; }
+
+/* The five stages, and the one button that says which of them is next. A stage that is
+   done, the stage you are on and a stage you have not reached have to be tellable apart
+   at a glance, or the strip is decoration rather than a map. */
+.cm-steps { display: flex; align-items: stretch; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; }
+.cm-step {
+  flex: 1 1 0; min-width: 104px; cursor: pointer; display: flex; flex-direction: column; gap: 2px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px 10px; background: var(--bg-raise); transition: border-color 120ms, background 120ms;
+}
+.cm-step:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.cm-step .cs-n {
+  font-size: 11px; font-weight: 700; color: var(--text-faint);
+  width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--border-strong);
+  display: flex; align-items: center; justify-content: center;
+}
+.cm-step .cs-l { font-size: 12px; font-weight: 550; color: var(--text-dim); }
+.cm-step .cs-note { font-size: 11px; color: var(--text-faint); }
+.cm-step.done .cs-n { color: var(--green); border-color: var(--green); }
+.cm-step.done .cs-l { color: var(--text); }
+.cm-step.now { border-color: var(--accent-dim); background: var(--bg-hover); }
+.cm-step.now .cs-n { color: var(--accent-soft); border-color: var(--accent); }
+.cm-step.now .cs-l { color: var(--accent-soft); }
+.cm-arrow { color: var(--text-faint); font-size: 13px; align-self: center; }
+.cm-next { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cm-next .hint { flex: 1 1 240px; min-width: 0; }
+
+/* The empty state teaches the order the stages run in — see ComicsUI.guideHtml. */
+.cm-guide { margin: 0 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cm-guide li { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+.cm-guide li b { color: var(--text); font-weight: 600; }
+
+.comic-panels { display: flex; flex-direction: column; gap: 14px; }
+.comic-panel {
+  display: grid; grid-template-columns: 190px 1fr; gap: 14px;
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px;
+  background: var(--bg-raise);
+}
+@media (max-width: 900px) { .comic-panel { grid-template-columns: 1fr; } }
+.comic-panel.generating { border-color: var(--accent-dim); }
+.comic-panel.failed { border-color: var(--red-dim); }
+.cpan-art { position: relative; }
+.cpan-art img {
+  width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--radius-sm);
+  display: block; cursor: zoom-in; background: var(--bg-hover);
+}
+.cpan-empty {
+  width: 100%; aspect-ratio: 1; border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;
+  color: var(--text-faint); font-size: 12px;
+}
+.cpan-n {
+  position: absolute; top: 6px; left: 6px; background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: var(--accent-soft); font-size: 11px; font-weight: 700;
+  border-radius: 4px; padding: 1px 6px;
+}
+.cpan-body { min-width: 0; }
+.cpan-body .fld { margin-bottom: 8px; }
+.cpan-lines { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.cpan-line { display: flex; gap: 6px; align-items: center; }
+.cpan-line .cl-speaker { flex: 0 0 110px; }
+.cpan-line .cl-text { flex: 1; min-width: 0; }
+.cpan-line .cl-kind { flex: 0 0 100px; }
+
+/* The preview is the real composer at a smaller scale — see comicsui.repaint. */
+.comic-stage {
+  margin-top: 14px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px; display: flex; justify-content: center;
+  overflow: auto; max-height: 78vh;
+}
+#cm-canvas { max-width: 100%; border-radius: 4px; cursor: default; }
+#cm-canvas.dragging { cursor: grabbing; }
+
+/* ---- Teach it: the hand-written playbook (teach.js) ------------------------
+   Visually separated from the derived panels above it on purpose. Everything in
+   this panel outranks the statistics, and it should not look like more of them. */
+.teach-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-top: 12px; }
+.teach-col h4 { margin: 0 0 4px; font-size: 12.5px; color: var(--text); letter-spacing: .02em; }
+.teach-col .hint { margin-bottom: 8px; }
+.teach-list { margin: 8px 0 10px; }
+.teach-list:empty::after { content: "Nothing taught yet."; font-size: 12px; color: var(--text-faint); }
+.t-row { display: flex; gap: 8px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.t-row:last-child { border-bottom: none; }
+.t-row .t-body { flex: 1; min-width: 0; }
+.t-row .t-text { font-size: 12.5px; color: var(--text); word-wrap: break-word; }
+.t-row .t-why { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.t-row .t-acts { flex: 0 0 auto; display: flex; gap: 4px; opacity: .55; transition: opacity .12s; }
+.t-row:hover .t-acts { opacity: 1; }
+.t-row .t-acts button { background: none; border: 1px solid var(--border); color: var(--text-faint);
+  border-radius: 4px; font-size: 11px; padding: 1px 6px; cursor: pointer; line-height: 1.6; }
+.t-row .t-acts button:hover { color: var(--text); border-color: var(--text-faint); }
+.t-badge { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+  padding: 0 5px; border-radius: 3px; border: 1px solid var(--border); color: var(--text-faint); margin-right: 6px; }
+.t-badge.always { color: var(--accent); border-color: var(--accent); }
+.t-badge.mine { color: var(--ok-soft); border-color: var(--ok-soft); }
+/* Derived lessons get the same affordances, so pin/mute sit where the eye already is. */
+.lesson { align-items: flex-start; }
+.lesson .l-acts { margin-left: auto; flex: 0 0 auto; display: flex; gap: 4px; opacity: .45; transition: opacity .12s; }
+.lesson:hover .l-acts { opacity: 1; }
+.lesson .l-acts button { background: none; border: 1px solid var(--border); color: var(--text-faint);
+  border-radius: 4px; font-size: 11px; padding: 1px 6px; cursor: pointer; line-height: 1.6; }
+.lesson .l-acts button:hover { color: var(--text); border-color: var(--text-faint); }
+.lesson.pinned .l-dot { color: var(--ok-soft); }
+/* Round-mode badges on cards and in the stats table. */
+.src-badge.explore { color: var(--info); border-color: var(--info); }
+.src-badge.wild { color: var(--wild); border-color: var(--wild); }
+.sat-bar { display: inline-block; height: 3px; border-radius: 2px; background: var(--accent); vertical-align: middle; margin-left: 6px; }
+
+/* Pixiv is hidden unless Settings -> Publishing -> Pixiv says otherwise. One class on <html>
+   hides every .px-only element (the sidebar entry, Review/Drafts pixiv buttons, the pixiv
+   settings body) without the code that draws them having to know. */
+html.pixiv-off .px-only { display: none !important; }
+/* Perchance (only while ComfyUI is the engine) and DeviantArt hide their sidebar entry only —
+   their panes stay reachable from buttons that need them (DA login, the Perchance health row). */
+html.perchance-off .nav-btn[data-tab="perchance"],
+html.da-off .nav-btn[data-tab="deviantart"] { display: none !important; }
+
+/* ---------- theme picker (Settings -> Library & app) ---------- */
+.theme-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 2px; }
+.theme-card {
+  flex: 1 1 200px; text-align: left; cursor: pointer;
+  background: var(--bg-raise); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 11px 12px;
+  color: var(--text); font-family: inherit; font-size: 13px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.theme-card:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+/* Inset rather than an outer ring: an outer one shifts the card by a pixel on select. */
+.theme-card.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.tc-name { font-weight: 650; display: flex; align-items: center; gap: 7px; }
+.tc-tick { color: var(--accent); visibility: hidden; }
+.theme-card.on .tc-tick { visibility: visible; }
+.tc-blurb { color: var(--text-faint); font-size: 12px; margin-top: 3px; }
+.tc-swatch { display: flex; gap: 4px; margin-top: 10px; }
+/* The swatches carry literal hex, not tokens - a card has to show the palette it is
+   offering, not the one already applied. */
+.tc-swatch i { width: 24px; height: 15px; border-radius: 3px; border: 1px solid var(--border-strong); }
+
+/* ---------- Overseer (the chat that runs the app) ---------- */
+/* The pane is `fill`, so the three rows below it divide the height between them: the
+   header and the strip are their natural size, the thread takes the rest and scrolls
+   itself, and the composer is pinned to the bottom. A page-level scrollbar here would
+   scroll the composer off screen mid-sentence. */
+#pane-overseer { padding: 0; }
+.ov-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;
+  padding: 22px 30px 14px; margin: 0; flex: 0 0 auto;
+}
+.ov-modes { flex: 0 0 auto; padding-top: 4px; }
+.ov-mode-row { display: flex; align-items: center; gap: 9px; font-size: 12.5px; }
+.ov-mode { color: var(--text-faint); transition: color 120ms ease; }
+.ov-mode.on { color: var(--text); font-weight: 650; }
+/* A switch, not a checkbox: this one decides whether the app does things on its own
+   overnight, and that deserves to look like a lever rather than a tick. */
+.ov-switch {
+  width: 40px; height: 22px; border-radius: 11px; padding: 0; cursor: pointer;
+  background: var(--bg-hover); border: 1px solid var(--border-strong);
+  position: relative; transition: background 140ms ease, border-color 140ms ease;
+}
+.ov-switch span {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--text-faint); transition: transform 140ms ease, background 140ms ease;
+}
+.ov-switch.on { background: var(--accent); border-color: var(--accent); }
+.ov-switch.on span { transform: translateX(18px); background: var(--on-accent); }
+
+.ov-strip { flex: 0 0 auto; padding: 0 30px 12px; border-bottom: 1px solid var(--border); }
+.ov-cells { display: flex; gap: 10px; flex-wrap: wrap; }
+.ov-cell {
+  flex: 1 1 190px; min-width: 0; background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 11px;
+}
+.ov-k { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); }
+.ov-v { display: block; margin-top: 3px; font-size: 12.5px; color: var(--text); overflow-wrap: anywhere; }
+.ov-v em { color: var(--text-faint); font-style: normal; }
+.ov-v.warn { color: var(--warn); }
+button.ov-v.link {
+  background: none; border: none; padding: 0; text-align: left; cursor: pointer;
+  font: inherit; font-size: 12.5px; color: var(--text); text-decoration: underline;
+  text-decoration-color: var(--border-hover); text-underline-offset: 3px;
+}
+button.ov-v.link:hover { text-decoration-color: var(--accent); }
+button.ov-v.link.tiny { display: inline; font-size: 11.5px; color: var(--text-faint); margin-left: 4px; }
+.ov-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.ov-actions .hint { margin-left: auto; }
+
+.ov-thread { flex: 1 1 auto; overflow-y: auto; padding: 18px 30px; display: flex; flex-direction: column; gap: 10px; }
+.ov-empty { margin: auto; max-width: 520px; text-align: center; color: var(--text-dim); }
+.ov-empty h2 { font-size: 16px; font-weight: 650; color: var(--text); margin-bottom: 8px; }
+.ov-empty p { font-size: 13px; line-height: 1.55; margin-bottom: 8px; }
+/* Reconciles the sidebar badge with an empty thread — see renderThread. */
+.ov-empty .ov-waiting { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px;
+  background: var(--bg-panel); color: var(--text); margin-bottom: 12px; }
+.ov-empty .ov-waiting .btn { margin-left: 6px; vertical-align: baseline; }
+
+.ov-msg { display: flex; flex-direction: column; max-width: 76%; }
+.ov-msg.user { align-self: flex-end; align-items: flex-end; }
+.ov-msg.agent { align-self: flex-start; }
+.ov-bubble {
+  padding: 9px 13px; border-radius: var(--radius); font-size: 13.5px; line-height: 1.55;
+  background: var(--bg-panel); border: 1px solid var(--border); overflow-wrap: anywhere;
+}
+.ov-msg.user .ov-bubble { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.ov-time { font-size: 10.5px; color: var(--text-faint); margin-top: 3px; }
+.ov-msg.thinking .ov-bubble { color: var(--text-faint); font-style: italic; }
+
+.ov-note { align-self: center; font-size: 11.5px; color: var(--text-faint); text-align: center; max-width: 80%; }
+.ov-note.err { color: var(--red); }
+/* A run marker earns rules on either side — it is the boundary between "what I asked for"
+   and "what it did while I was out". */
+.ov-note.marker {
+  display: flex; align-items: center; gap: 10px; width: 100%; max-width: none;
+  text-transform: uppercase; letter-spacing: .06em; font-size: 10.5px;
+}
+.ov-note.marker::before, .ov-note.marker::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+/* Every tool call is shown, always, collapsed. An agent you cannot audit is an agent you
+   cannot leave on a schedule — and "it said it queued ten" is a different claim from
+   "queue_art returned queued: 10". */
+.ov-tool { align-self: flex-start; max-width: 76%; font-size: 12px; }
+.ov-tool-head {
+  display: flex; align-items: baseline; gap: 8px; cursor: pointer;
+  color: var(--text-dim); padding: 3px 2px;
+}
+.ov-tool-head:hover { color: var(--text); }
+.ov-tool-ico { color: var(--green); font-size: 11px; }
+.ov-tool:has(.ov-tool-ico:not(:empty)) .ov-tool-name { font-weight: 650; }
+.ov-tool-sum { color: var(--text-faint); overflow-wrap: anywhere; }
+.ov-tool-body {
+  display: none; margin: 4px 0 0 18px; padding: 8px 10px; max-height: 240px; overflow: auto;
+  background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-family: var(--mono); font-size: 11px; color: var(--text-dim); white-space: pre-wrap;
+}
+.ov-tool.open .ov-tool-body { display: block; }
+.ov-tool:has(.ov-research-card) { max-width: min(92%, 980px); }
+.ov-research-card {
+  margin: 6px 0 4px 18px; padding: 10px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--bg-panel);
+}
+.ov-research-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.ov-research-title b { color: var(--text); font-size: 12.5px; }
+.ov-research-title span { color: var(--text-faint); font-size: 11px; }
+.ov-research-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 7px; }
+.ov-research-image {
+  min-width: 0; padding: 0; overflow: hidden; cursor: pointer; text-align: left;
+  background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-dim);
+}
+.ov-research-image:hover { border-color: var(--accent); color: var(--text); }
+.ov-research-image img { display: block; width: 100%; height: 96px; object-fit: cover; background: var(--bg-hover); }
+.ov-research-image > span { display: block; padding: 6px 7px; font: inherit; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-research-image b { color: var(--accent); }
+.ov-research-sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ov-research-sources button {
+  max-width: 280px; padding: 5px 8px; cursor: pointer; text-align: left;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--bg-sunken);
+  color: var(--text-dim); font: inherit; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ov-research-sources button:hover { border-color: var(--accent); color: var(--text); }
+.ov-research-sources b { color: var(--accent); }
+.ov-research-sources span { color: var(--text-faint); }
+.ov-prompt-set { display: flex; flex-direction: column; gap: 7px; }
+.ov-prompt-set .ov-research-title { margin-bottom: 1px; }
+.ov-research-prompt {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: 8px;
+  padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-sunken);
+}
+.ov-research-prompt p { margin: 0; color: var(--text); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; }
+.ov-prompt-n { color: var(--accent); font-weight: 700; padding-top: 2px; text-align: center; }
+
+.ov-composer { flex: 0 0 auto; display: flex; gap: 10px; padding: 12px 30px 0; align-items: flex-end; }
+.ov-composer textarea {
+  flex: 1 1 auto; resize: vertical; min-height: 46px; max-height: 200px;
+  font-family: inherit; font-size: 13.5px; line-height: 1.5;
+}
+.ov-send { display: flex; flex-direction: column; gap: 6px; }
+/* Chat attachments: a strip of pending pictures above the composer, and thumbnails inside
+   the artist's own bubbles. The button stays visible when no vision model is routed, but
+   dimmed and explained in its tooltip, so its absence is never a mystery. */
+.ov-attach-btn { flex: 0 0 auto; align-self: flex-end; min-width: 40px; height: 46px; font-size: 17px; padding: 0 10px; }
+.ov-attach-btn:disabled { opacity: .4; cursor: not-allowed; }
+.ov-attach-strip { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 30px 0; }
+.ov-attach-strip[hidden] { display: none; }
+.ov-chip {
+  position: relative; width: 74px; height: 74px; border-radius: var(--radius-sm); overflow: hidden;
+  border: 1px solid var(--border); background: var(--bg-sunken);
+}
+.ov-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ov-chip.busy { display: grid; place-items: center; font-size: 11px; color: var(--text-faint); }
+.ov-chip-x {
+  position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; border: 0;
+  background: rgba(0,0,0,.65); color: #fff; font-size: 12px; line-height: 20px; padding: 0; cursor: pointer;
+}
+.ov-chip-id { position: absolute; left: 4px; bottom: 3px; font-size: 10px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9); }
+.ov-composer.drop { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: var(--radius); }
+.ov-msg-atts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-bottom: 5px; }
+.ov-msg-atts button { padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-sunken); cursor: zoom-in; position: relative; }
+.ov-msg-atts img { display: block; max-width: 180px; max-height: 140px; object-fit: cover; }
+.ov-msg-atts button.big img { max-width: min(520px, 60vw); max-height: 60vh; object-fit: contain; }
+.ov-msg-atts span { position: absolute; left: 4px; bottom: 2px; font-size: 10px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9); }
+.ov-keyhint { flex: 0 0 auto; margin: 8px 30px 14px; }
+
+/* ---------- Pick keepers (triage.js / triageui.js) ----------
+ * A full-screen working surface rather than a modal card: the pictures are the whole point,
+ * so they get every pixel the window has. Below #modal-root (50) so a confirm or a toast
+ * still lands on top of it. */
+#triage-root { position: fixed; inset: 0; z-index: 45; }
+#triage-root[hidden] { display: none; }
+.tri-backdrop {
+  position: absolute; inset: 0; background: var(--bg);
+  display: flex; flex-direction: column; gap: 10px; padding: 12px 20px 14px;
+}
+.tri-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.tri-title { font-size: 16px; font-weight: 700; display: flex; align-items: baseline; gap: 10px; }
+.tri-count { font-size: 12.5px; font-weight: 500; color: var(--text-dim); }
+.tri-opt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+.tri-opt select { width: auto; padding: 4px 8px; font-size: 12.5px; }
+.tri-ai { color: var(--accent-soft); }
+.tri-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.tri-prompt { display: flex; align-items: center; gap: 10px; font-size: 12.5px; min-width: 0; }
+.tri-prompt-text { flex: 1; min-width: 0; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tri-grid { flex: 1; min-height: 0; display: grid; gap: 10px; grid-auto-rows: minmax(0, 1fr); }
+.tri-tile {
+  position: relative; min-height: 0; overflow: hidden; cursor: pointer;
+  border: 3px solid var(--border); border-radius: var(--radius); background: var(--bg-sink);
+  display: flex; align-items: center; justify-content: center; transition: border-color 100ms;
+}
+.tri-tile:hover { border-color: var(--border-hover); }
+.tri-tile img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; }
+.tri-tile.keep { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.tri-num {
+  position: absolute; top: 8px; left: 8px; background: rgba(0, 0, 0, .74); color: #fff;
+  font-weight: 800; font-size: 18px; border-radius: 6px; padding: 1px 10px;
+}
+.tri-tile.was-kept .tri-num::after { content: ' ★'; color: var(--accent-soft); }
+.tri-badge {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  background: var(--accent); color: var(--on-accent); font-weight: 800; font-size: 12px;
+  letter-spacing: .06em; border-radius: 999px; padding: 3px 12px;
+}
+.tri-badge:empty { display: none; }
+.tri-zoom {
+  position: absolute; top: 8px; right: 8px; background: rgba(0, 0, 0, .6); color: #fff;
+  border: 1px solid rgba(255, 255, 255, .25); border-radius: 6px; font-size: 14px;
+  padding: 2px 8px; cursor: pointer; opacity: .7;
+}
+.tri-zoom:hover { opacity: 1; }
+.tri-qc {
+  position: absolute; bottom: 8px; right: 8px; background: rgba(0, 0, 0, .74);
+  font-size: 11.5px; font-weight: 700; border-radius: 6px; padding: 2px 8px;
+}
+.tri-qc.ok { color: var(--green); }
+.tri-qc.bad { color: var(--red); }
+.tri-ai-note {
+  position: absolute; left: 8px; bottom: 8px; max-width: calc(100% - 90px);
+  background: rgba(0, 0, 0, .76); color: #fff; font-size: 12px; border-radius: 6px;
+  padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-left: 3px solid var(--text-faint);
+}
+.tri-ai-note.clean { border-left-color: var(--green); }
+.tri-ai-note.minor { border-left-color: var(--warn); }
+.tri-ai-note.broken { border-left-color: var(--red); }
+.tri-foot { display: flex; flex-direction: column; gap: 8px; }
+.tri-foot .keyhint { margin: 0; }
+.tri-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tri-src { color: var(--accent-soft); }
+.tri-zoomview { flex: 1; min-height: 0; display: flex; align-items: center; gap: 12px; }
+.tri-zoomview .modal-nav { position: static; transform: none; flex: 0 0 auto; }
+.tri-zoomstage {
+  flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 8px;
+}
+.tri-zoom-img {
+  max-width: 100%; max-height: calc(100% - 44px); object-fit: contain; cursor: pointer;
+  border: 3px solid var(--border); border-radius: var(--radius);
+}
+.tri-zoom-img.keep { border-color: var(--accent); }
+.tri-empty {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; text-align: center; max-width: 580px; margin: 0 auto;
+}
+.tri-empty-big { font-size: 26px; font-weight: 700; }
+/* Toasts sit above the overlay's action row instead of on top of its main button. */
+body.triage-open #toast-root { bottom: 76px; }
