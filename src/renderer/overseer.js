@@ -21,6 +21,16 @@
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number(v) || 0));
   const dayKey = (ts = Date.now()) => new Date(ts).toDateString();
 
+  // Reference preferences stated in plain words: "one reference max", "2 refs at most",
+  // "cycle between them". Common misspellings (refference, refrence) match the stem.
+  const NUM_WORD = { one: 1, single: 1, a: 1, two: 2, three: 3, four: 4 };
+  const REF_STEM = '(?:ref+e?r+e?n[cs]e?s?\\w*|refs?|ref\\b)';
+  const REF_MAX_RE = new RegExp(`\\b(?:(?:max(?:imum)?|at most|only|just|no more than|up to)\\s+(?:of\\s+)?(\\d+|one|a single|single|two|three|four)|(\\d+|one|a single|single|two|three|four))\\s+(?:\\w+\\s+){0,2}${REF_STEM}(?:\\s+(?:\\w+\\s+){0,2}(max(?:imum)?|at most|only|per (?:picture|image|render|job|prompt)|each))?`, 'i');
+  const REF_CYCLE_RE = /\b(cycl\w*|rotat\w*|alternat\w*|take turns|round[- ]robin)\b|\b(?:switch|vary|mix)\w*\s+(?:\w+\s+){0,2}(?:between|through|among)\b|\b(?:different|another|other)\s+(?:\w+\s+){0,2}ref\w*\s+(?:for|on|in)\s+(?:each|every)\b/i;
+  const REF_NO_CYCLE_RE = /\b(?:don['’]?t|do not|no|stop)\s+(?:\w+\s+){0,2}(?:cycl|rotat|alternat)\w*|\b(?:same|best) (?:one|ref\w*) (?:for|on|in) (?:all|every|each)\b/i;
+  /** Rotate a list so job k starts at candidate k (cycling references across a batch). */
+  const rotate = (arr, k) => (arr.length ? [...arr.slice(k % arr.length), ...arr.slice(0, k % arr.length)] : []);
+
   const TOOL_RESULT_CAP = 4000;
   const TOOL_KEEP_FULL = 2;
   const ABRIDGED_CAP = 220;
@@ -80,7 +90,7 @@
   }
   // Argument keys that are numbers, booleans or lists whatever the model typed.
   const NUM_KEYS = new Set(['top', 'limit', 'count', 'webLimit', 'imageLimit', 'referenceCount', 'seconds', 'minutes', 'passThreshold', 'maxRetries']);
-  const BOOL_KEYS = new Set(['fresh', 'first', 'original', 'skipQc', 'skipMetadata']);
+  const BOOL_KEYS = new Set(['fresh', 'first', 'original', 'skipQc', 'skipMetadata', 'cycleReferences']);
   const LIST_KEYS = new Set(['ids', 'imageIds', 'referenceImages', 'order']);
 
   /** `queueArt`, `Queue-Art`, `functions.queue_art`, ` queue art ` → `queue_art`. */
@@ -226,6 +236,7 @@
         else if (typeof v === 'boolean') props[k] = { type: 'boolean' };
         else if (typeof v === 'string' && /^[a-z_]+(\|[a-z_]+)+$/.test(v)) props[k] = { type: 'string', enum: v.split('|') };
         else if (NUM_KEYS.has(k)) props[k] = { type: 'number', description: String(v) };
+        else if (BOOL_KEYS.has(k)) props[k] = { type: 'boolean', description: String(v) };
         else props[k] = { type: 'string', ...(v && v !== '...' ? { description: String(v) } : {}) };
       }
     }
@@ -241,6 +252,7 @@
       const summary = { truncated: true, note: 'Result shortened; use the saved id for the next action instead of copying the omitted payload.' };
       for (const key of ['ok', 'error', 'refused', 'cancelled', 'queued', 'written', 'failed', 'matched', 'idle',
         'researchId', 'promptSetId', 'sourceCount', 'imageCount', 'referenceCount', 'referenceCeiling', 'skipped',
+        'attachPerJob', 'cycled', 'perJobReferences', 'cappedBy', 'batchId',
         'cardId', 'video', 'where', 'lengthSeconds', 'source', 'selfCheck']) {
         if (value[key] !== undefined) summary[key] = typeof value[key] === 'string' ? value[key].slice(0, 400) : value[key];
       }
@@ -260,6 +272,8 @@
       shrink('prompts'); shrink('images'); shrink('sources');
       if (value.prompts?.length > (summary.prompts || []).length) {
         summary.promptsOmitted = value.prompts.length - (summary.prompts || []).length;
+        // Only the display is shortened; the saved set keeps every prompt.
+        summary.note = `Display only: all ${value.prompts.length} prompts are saved in full under promptSetId; ${summary.promptsOmitted} are just not shown here. Nothing was dropped.`;
       }
       if (JSON.stringify(summary).length <= TOOL_RESULT_CAP
           && (value.researchId || value.promptSetId || value.sources || value.images || value.prompts)) {
@@ -408,17 +422,17 @@
       },
     },
     write_research_prompts: {
-      args: '{"researchId": "latest if omitted", "imageIds": ["i1","i2"], "count": 6, "mode": "recreate|variations|inspired", "theme": "optional steer", "extra": "optional trusted instruction"}',
-      what: 'Download the image ids you name (or the first few candidates), have vision verify/read them, then write exact image-generation prompts grounded in both the images and source snippets. The ids you name ARE the reference count for the queued jobs, so pass exactly the number the artist asked for; the ceiling is Settings → Generator → Max searched references and anything over it is reported back as skippedReferences (never silently dropped). For recreating a named character use mode="recreate". It writes prompts only; it does NOT queue or generate pictures. Returns a promptSetId for queue_research_prompts.',
+      args: '{"researchId": "latest if omitted", "imageIds": ["i1","i2"], "referenceImages": ["a1","a2 — pictures he attached in this chat"], "count": 6, "mode": "recreate|variations|inspired", "theme": "optional steer", "extra": "optional trusted instruction"}',
+      what: 'Download the image ids you name (or the first few candidates), have vision verify/read them, then write exact image-generation prompts grounded in both the images and source snippets. The ids you name ARE the reference count for the queued jobs, so pass exactly the number the artist asked for; the ceiling is Settings → Generator → Max searched references and anything over it is reported back as skippedReferences (never silently dropped). For recreating a named character use mode="recreate". referenceImages = pictures he ATTACHED in this chat (a1, a2…): they are read the same way, rank ahead of the web images, and ride with the jobs when the set is queued — use them when he says "use that as a reference / write around these" (leave imageIds out to write from his pictures only). It writes prompts only; it does NOT queue or generate pictures. Returns a promptSetId for queue_research_prompts.',
       run: (a) => Overseer.writeResearchPrompts(a),
     },
     queue_research_prompts: {
-      args: '{"promptSetId": "...", "researchId": "optional", "theme": "optional label", "referenceImages": ["a1"], "first": false}',
+      args: '{"promptSetId": "...", "researchId": "optional", "theme": "optional label", "referenceImages": ["a1"], "cycleReferences": "true when he wants each picture to use a DIFFERENT reference (cycle/rotate/vary between them)", "first": false}',
       what: 'Queue the exact saved prompts produced by write_research_prompts and start the worker. With the Qwen-Image 2.1 text+reference ComfyUI workflow, the selected verified web images are inserted into every queued job automatically. Use this instead of queue_art after web research; queue_art would throw the researched identity/reference work away and ideate from a bare theme again.',
       run: (a) => Overseer.queueResearchPrompts(a),
     },
     queue_art: {
-      args: '{"theme": "what the pictures are about", "count": 6, "mode": "exploit|explore|wild", "referenceImages": ["a1"], "first": false}',
+      args: '{"theme": "what the pictures are about", "count": 6, "mode": "exploit|explore|wild", "referenceImages": ["a1"], "cycleReferences": "true when each picture should use a different one of the references", "first": false}',
       what: 'Write prompts on a theme and queue them for generation. This is the main thing you do. The finished images land in Review under "Agent generated"; they are never posted by this tool. New jobs go to the BACK of the queue; pass first:true when he wants them generated before what is already waiting (same for queue_research_prompts). Returns a batchId that reorder_queue accepts. referenceImages (optional) = ids of pictures the artist attached in this chat (a1, a2…): on the Qwen-Image 2.1 reference workflow they are fed to the generator with every job, so use them when he says "make this character", "like this", "use this as reference". The prompt writer does NOT see them — put what you saw (identity, outfit, palette) into the theme in words.',
       run: (a) => Overseer.queueArt(a),
     },
@@ -750,6 +764,7 @@
 
     async writeResearchPrompts({
       researchId = '', imageIds = null, count = 6, mode = 'recreate', theme = '', extra = '',
+      referenceImages = null,
     } = {}) {
       const epoch = this._cancelEpoch;
       if (this._abort) return cancelled();
@@ -762,7 +777,16 @@
       const ceiling = window.ComfyUI?.referenceLimit
         ? window.ComfyUI.referenceLimit(State.settings && State.settings.comfy)
         : 4;
-      const selectedIds = Array.isArray(imageIds) ? new Set(imageIds.map(String)) : null;
+      // His chat attachments (a1…). An i-id passed here is a research image, as in queue_art.
+      const chatWant = (Array.isArray(referenceImages) ? referenceImages : referenceImages ? [referenceImages] : [])
+        .map((x) => String(x).trim()).filter(Boolean);
+      const researchInChat = chatWant.filter((id) => /^i\d+$/i.test(id) && (pack.images || []).some((im) => String(im.id) === id));
+      const chatRows = this.chatReferenceRows(chatWant.filter((id) => !researchInChat.includes(id)));
+      if (chatRows.error) return { ok: false, error: chatRows.error, availableImageIds: chatRows.availableImageIds };
+      let imageIdList = Array.isArray(imageIds) ? imageIds.map(String) : imageIds ? [String(imageIds)] : null;
+      if (researchInChat.length) imageIdList = [...new Set([...(imageIdList || []), ...researchInChat])];
+      // His own pictures and no imageIds = write from his pictures, not the web set.
+      const selectedIds = imageIdList ? new Set(imageIdList) : (chatRows.rows.length ? new Set() : null);
       const knownImageIds = new Set((pack.images || []).map((im) => String(im.id)));
       const wanted = (pack.images || []).filter((im) => !selectedIds || selectedIds.has(String(im.id)));
       if (selectedIds?.size && !wanted.length) {
@@ -816,6 +840,26 @@
           referenceErrors.push({ id: im.id, title: im.title, error: String(e.message || e).slice(0, 300) });
         }
       });
+      // His attachments: the bytes are already on disk; read them with the same vision reader.
+      for (const row of chatRows.rows) {
+        if (this._abort || epoch !== this._cancelEpoch) break;
+        try {
+          const got = await window.ala.files.readAttachment(row.fname);
+          if (!got || !got.base64) throw new Error('the attached file is empty');
+          const small = await Pipeline.downscaleForQc(got.base64, got.mime || row.mime || 'image/png');
+          const reader = pack.kind === 'character' ? PromptLab.readCharacterReference : PromptLab.readConceptReference;
+          const brief = await reader.call(PromptLab, {
+            base64: small.base64, mime: small.mime, label: `the artist's own reference ${row.id}`, subject: pack.query,
+          });
+          brief.referenceId = row.id;
+          brief.fromChat = true;
+          briefs.push(brief);
+        } catch (e) {
+          referenceErrors.push({ id: row.id, title: row.name, error: String(e.message || e).slice(0, 300) });
+        }
+      }
+      // His own pictures first: he chose them.
+      briefs.sort((a, b) => (b.fromChat ? 1 : 0) - (a.fromChat ? 1 : 0));
       if (this._abort || epoch !== this._cancelEpoch) return cancelled();
       if (!briefs.length && !(pack.sources || []).length) {
         return { ok: false, error: 'none of the references could be read and there are no text sources to fall back to', failedReferences: referenceErrors };
@@ -842,6 +886,7 @@
         id: `prompts-${U.uid()}`, at: Date.now(), mode: validModes.has(mode) ? mode : 'recreate',
         theme: String(theme || '').trim().slice(0, 600), prompts,
         imageIds: briefs.map((b) => b.referenceId).filter(Boolean),
+        chatReferences: chatRows.rows.filter((r) => briefs.some((b) => b.referenceId === r.id)).map((r) => ({ ...r })),
         failedReferences: referenceErrors,
         provider: written.provider || '', engine: written.engine || '', queuedAt: null,
       };
@@ -855,11 +900,62 @@
         referenceCeiling: ceiling, skippedReferences: overCeiling.map((s) => s.id),
         sourceCount: (pack.sources || []).length,
         provider: written.provider || null,
-        note: `Prompts are saved but not queued. ${briefs.length} of ${wanted.length} selected reference(s) were read; the ceiling is ${ceiling}. Use queue_research_prompts with promptSetId only if the artist asked to generate them.`,
+        ...(chatRows.rows.length ? { chatReferencesRead: briefs.filter((b) => b.fromChat).map((b) => b.referenceId) } : {}),
+        note: `Prompts are saved but not queued. ${briefs.length} of ${wanted.length + chatRows.rows.length} selected reference(s) were read${briefs.some((b) => b.fromChat) ? ` (his attachments ${briefs.filter((b) => b.fromChat).map((b) => b.referenceId).join(', ')} first)` : ''}; the ceiling is ${ceiling}. Use queue_research_prompts with promptSetId only if the artist asked to generate them.`,
       };
     },
 
-    async queueResearchPrompts({ promptSetId, researchId = '', theme = '', referenceImages = null, first = false } = {}) {
+    /**
+     * What the artist SAID about references, read from his own recent words in code rather
+     * than left to the model: a per-picture cap ("one reference max") and whether to cycle
+     * ("cycle between them"). The newest message that states either wins.
+     * Returns { max: number|null, cycle: boolean|null }.
+     */
+    referencePrefs() {
+      const texts = [String(this._requestText || '')];
+      const users = (this.messages || []).filter((m) => m && m.role === 'user' && !m.hidden).slice(-12).reverse();
+      for (const m of users) if (m.text && m.text !== texts[0]) texts.push(String(m.text));
+      let max = null; let cycle = null;
+      for (const raw of texts) {
+        const t = raw.toLowerCase();
+        if (max === null) {
+          const m = REF_MAX_RE.exec(t);
+          // A stated number only ever LOWERS the per-picture count; it is a cap, never a raise.
+          if (m) {
+            const w = String(m[1] || m[2]).replace(/^a /, '');
+            const n = /^\d+$/.test(w) ? Number(w) : NUM_WORD[w];
+            if (n >= 0 && n <= 16) max = n;
+          }
+        }
+        if (cycle === null) {
+          if (REF_NO_CYCLE_RE.test(t)) cycle = false;
+          else if (REF_CYCLE_RE.test(t) && /\bref\w*|between them|for variety/.test(t)) cycle = true;
+        }
+        if (max !== null && cycle !== null) break;
+      }
+      return { max, cycle };
+    },
+
+    /**
+     * Give each job of a batch its references. `candidates` are ids in preference order;
+     * `per` is how many ride with one render. Without cycling every job carries the same
+     * list and the first `per` are attached. With cycling, job k starts at candidate k*per,
+     * so the batch rotates through all of them.
+     */
+    assignReferences(jobs, candidates, per, cycle) {
+      const ids = [...new Set((candidates || []).map(String).filter(Boolean))];
+      const doCycle = !!cycle && per > 0 && ids.length > per;
+      jobs.forEach((job, k) => {
+        job.referenceIds = doCycle ? rotate(ids, k * per) : [...ids];
+        if (per > 0 && ids.length) job.referenceCount = per;
+      });
+      return {
+        cycled: doCycle,
+        perJobReferences: jobs.map((j) => (j.referenceIds || []).slice(0, per || 1)),
+      };
+    },
+
+    async queueResearchPrompts({ promptSetId, researchId = '', theme = '', referenceImages = null, first = false, cycleReferences = null } = {}) {
       if (this._abort) return cancelled();
       const noGen = this.generationRefusal();
       if (noGen) return noGen;
@@ -905,13 +1001,21 @@
         job.promptSetId = set.id;
         job.researchPromptIndex = row.index;
         job.researchQuery = pack.query;
-        job.referenceIds = [...(set.imageIds || [])];
-        if (chatRefs.rows.length) {
-          job.chatReferences = chatRefs.rows.map((r) => ({ ...r }));
-          job.referenceIds.push(...chatRefs.rows.map((r) => r.id));
-        }
         return job;
       });
+      // The set's own attachments (from write_research_prompts) plus any named now.
+      const setChat = Array.isArray(set.chatReferences) ? set.chatReferences.filter((r) => r && r.id && r.fname) : [];
+      const extraChat = chatRefs.rows.filter((r) => !setChat.some((s) => s.id === r.id));
+      const ceiling = window.ComfyUI?.referenceLimit ? window.ComfyUI.referenceLimit(State.settings && State.settings.comfy) : 4;
+      const prefs = this.referencePrefs();
+      const per = prefs.max !== null ? Math.max(1, Math.min(ceiling, prefs.max)) : ceiling;
+      const capped = prefs.max !== null && prefs.max < ceiling;
+      const cycle = cycleReferences === null || cycleReferences === undefined ? !!prefs.cycle : !!cycleReferences;
+      const candidates = [...(set.imageIds || []), ...extraChat.map((r) => r.id)];
+      const assigned = this.assignReferences(jobs, candidates, per, cycle);
+      if (!capped && !assigned.cycled) jobs.forEach((j) => { delete j.referenceCount; });
+      const chatAll = [...setChat, ...extraChat];
+      if (chatAll.length) for (const job of jobs) job.chatReferences = chatAll.map((r) => ({ ...r }));
       const batchId = this.insertJobs(jobs, first);
       if (window.Variety) Variety.invalidate();
       if (!Pipeline.running) Pipeline.start();
@@ -923,9 +1027,17 @@
         ok: !!Pipeline.running, queued: jobs.length, skipped, failed: banned,
         researchId: pack.id, promptSetId: set.id, theme: label, running: !!Pipeline.running,
         batchId, position: first ? 'front' : 'back', jobsAhead: this.jobsAhead(batchId),
-        referenceCount: (set.imageIds || []).length,
+        referenceCount: candidates.length,
+        attachPerJob: per,
+        cycled: assigned.cycled,
+        perJobReferences: assigned.perJobReferences,
+        ...(capped ? { cappedBy: `his message caps references at ${prefs.max} per picture` } : {}),
         ...(Pipeline.running ? {} : { error: 'Prompts are queued, but the worker did not start; check the generation driver.' }),
-        note: 'The exact researched prompts and their selected reference ids were queued. A compatible Qwen-Image 2.1 ComfyUI workflow receives those images at generation time; nothing was published.',
+        note: `The exact researched prompts were queued with ${candidates.length} reference(s); each render attaches up to ${per} through the Qwen-Image 2.1 ComfyUI workflow. `
+          + (assigned.cycled
+            ? `References CYCLE across the batch: ${assigned.perJobReferences.map((r, i) => `job ${i + 1} → ${r.join('+')}`).join(', ')}.`
+            : 'Every job attaches the same references; pass cycleReferences:true to rotate them instead.')
+          + ' Report exactly this. Nothing was published.',
       };
     },
 
@@ -971,7 +1083,7 @@
       };
     },
 
-    async queueArt({ theme, count, mode = 'exploit', referenceImages = null, first = false } = {}) {
+    async queueArt({ theme, count, mode = 'exploit', referenceImages = null, first = false, cycleReferences = null } = {}) {
       const epoch = this._cancelEpoch;
       if (this._abort) return cancelled();
       const t = String(theme || '').trim();
@@ -1010,6 +1122,17 @@
         }
         return job;
       });
+      let assignedArt = null;
+      if (refs.rows.length) {
+        const prefs = this.referencePrefs();
+        const ceilingArt = window.ComfyUI?.referenceLimit ? window.ComfyUI.referenceLimit(State.settings && State.settings.comfy) : 4;
+        const artCycle = cycleReferences === null || cycleReferences === undefined ? !!prefs.cycle : !!cycleReferences;
+        const capArt = prefs.max !== null && prefs.max < refs.rows.length;
+        if (capArt || artCycle) {
+          const per = capArt ? Math.max(1, Math.min(ceilingArt, prefs.max)) : ceilingArt;
+          assignedArt = this.assignReferences(jobs, refs.rows.map((r) => r.id), per, artCycle);
+        }
+      }
       const batchId = this.insertJobs(jobs, first);
       if (window.Variety) Variety.invalidate();
       if (!Pipeline.running) Pipeline.start();
@@ -1017,6 +1140,7 @@
       return { ok: !!Pipeline.running, queued: jobs.length, theme: t, running: !!Pipeline.running,
         batchId, position: first ? 'front' : 'back', jobsAhead: this.jobsAhead(batchId),
         ...(refs.rows.length ? { referenceImages: refs.rows.map((r) => r.id) } : {}),
+        ...(assignedArt ? { cycled: assignedArt.cycled, perJobReferences: assignedArt.perJobReferences } : {}),
         ...(Pipeline.running ? {} : { error: 'Prompts are queued, but the worker did not start; check the generation driver.' }),
         note: 'Queued images appear in Review under "Agent generated" after generation; nothing was published.' + this.chatReferenceNote(refs.rows.length) };
     },
@@ -1601,7 +1725,8 @@ WEB RESEARCH AND REFERENCES
 PICTURES HE ATTACHES
 - A message may carry images (ids a1, a2… listed in the message and in the state block as chatImages). If you can see them, look before you answer: describe what matters for the request, and never claim details you cannot see. If a message says an image could not be shown to you, say that plainly instead of guessing.
 - "Make this", "like this", "this character", "use it as a reference" → queue_art with referenceImages set to those ids AND a theme that spells out what you saw (identity, hair, eyes, outfit, palette, setting) — the prompt writer only reads words. On the Qwen-Image 2.1 reference workflow the pictures themselves also condition every render.
-- Each attached reference costs render time on every picture (roughly +80 s per reference per render on the 40-step model), so pass only the ids he meant.
+- Each attached reference costs render time on every picture (roughly +80 s per reference per render on the 40-step model), so pass only the ids he meant. "One reference max, cycle between them" → cycleReferences true (the app also applies a per-picture cap he states). Report the queue result's perJobReferences/note as-is; never describe attachment you did not get a receipt for.
+- Text-only models receive attached pictures as a description written by the vision model; work from that description and say so if a detail is not in it.
 - An attachment is not a request to publish or to change settings; the usual rules apply.
 - "Edit this", "this but with/without X", "give her a hat", "change the outfit", "same picture but…" about a picture he attached → edit_image with that id and his change as instruction (ONE picture unless he asks for more). The app CAN edit pictures: Qwen-Image 2.1 takes the picture as <image1> and changes only what he asks. Never say it cannot edit in place, and never use queue_art for an edit (queue_art writes new pictures that only resemble his).
 - "Make a video of this", "animate it", "turn it into a clip" → make_video and his motion words as instructions. WHICH picture: one you made ("that generated image", "the edit", "it" right after an edit) → cardId from recentResults, or fromBatch with the batchId edit_image/queue_art returned; "edit this and make a video of it" in one message → edit_image, then make_video with fromBatch = that batchId (it waits for the edit). image: a1 is ONLY his unedited original. The app DOES make videos with sound: never answer that it only makes stills. "Longer/shorter/20 seconds" → the seconds argument; the length IS adjustable, default 10 s. Pass the number he asks for (20 s works in one render); never refuse or shorten a length request.
@@ -1826,7 +1951,7 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
       }
 
       this._uploadAsked = this.uploadRequested(t);
-      this._generateAsked = this.generationRequested(t);
+      this._generateAsked = this.generationRequested(t, { attachments: files.length });
       this._requestText = t;
       this.push('user', t, meta);
       await this.turn('helper');
@@ -1841,11 +1966,15 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
     },
 
     /** Did this message ask for pictures to be made? */
-    generationRequested(text) {
-      const t = String(text || '').trim().toLowerCase();
+    generationRequested(text, { attachments = 0 } = {}) {
+      // Stray keys at the end are typos, not words ("yes\\" is still a yes).
+      const t = String(text || '').trim().toLowerCase().replace(/[\s\\/;:'"`~|]+$/, '');
       if (!t) return false;
-      if (/^(?:(?:yes|yeah|yep|yup|sure|ok(?:ay)?|go(?: ahead)?|do it|please(?: do)?|sounds good|queue (?:it|them)|make (?:it|them))\b[\s!.,]*)+$/.test(t)) return true;
+      if (/^(?:(?:yes|yeah|yep|yup|ye|ya|sure|ok(?:ay)?|k|go(?: ahead)?|do it|please(?: do)?|sounds good|queue (?:it|them)|make (?:it|them))\b[\s!.,]*)+$/.test(t)) return true;
       if (/\b(don['’]?t|do not|never|stop|no more)\s+(\w+\s+){0,2}(generat|queue|make|making|render|creat|draw|edit)/.test(t)) return false;
+      // A picture attached with "use that as a reference / like this / this character" is a
+      // request for pictures of it.
+      if (attachments > 0 && /\b(ref\w*|use (?:this|that|it|these|those|them|her|him)|like (?:this|that|these)|this (?:character|girl|guy|one|style|outfit)|same (?:character|girl|guy|style|outfit)|based on)\b/.test(t)) return true;
       return /\b(generat\w*|queue\w*|make|making|render\w*|creat\w*|draw\w*|produce|batch|edit\w*|do (?:one|it|another|that)|more (of|like)|(\d+|one|a few|some) more|another|again|redo|recreate|research|look up|find references|write \d*\s*prompts?|prompts? for|pictures?|images?|art(work)?|pics?|variations?|animat\w*|videos?|clips?)\b/.test(t);
     },
 
@@ -1867,7 +1996,8 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
         this._pending = last ? (typeof last === 'string' ? last : last.text) : null;
         this._requestText = text;
         this._uploadAsked = this.uploadRequested(text);
-        this._generateAsked = this.generationRequested(text);
+        const atts = msg && typeof msg === 'object' && Array.isArray(msg.attachments) ? msg.attachments.length : 0;
+        this._generateAsked = this.generationRequested(text, { attachments: atts });
         await this.turn('helper');
       }
     },
@@ -2071,12 +2201,17 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
         cached: res.cachedTokens || 0,
       };
       this._lastModelKey = `${res.providerId || res.provider || ''}::${res.model || ''}`;
-      // Every vision-capable link failed and a text-only one answered with the pictures
-      // replaced by a note. Say so once per turn, in the transcript, rather than letting a
-      // reply about "your image" read as if it had been seen.
+      // A text-only model answered. If the vision route described the pictures for it, say
+      // who read them; only pictures nobody could read are flagged as a problem. Once per turn.
       if (res.sawImages === false && !this._blindNoted) {
         this._blindNoted = true;
-        this.push('note', `${res.provider || 'The model'} answered without seeing the attached image(s) — no vision-capable provider in the Overseer chain responded. Check Settings → Providers.`, { kind: 'err' });
+        if (res.imagesDescribed && !res.imagesUndescribed) {
+          this.push('note', `${res.provider || 'The model'} cannot see images, so ${res.imagesDescribedBy || 'the vision model'} described the attached picture(s) for it.`);
+        } else if (res.imagesDescribed) {
+          this.push('note', `${res.provider || 'The model'} cannot see images; ${res.imagesDescribedBy || 'the vision model'} described ${res.imagesDescribed} picture(s) but ${res.imagesUndescribed} could not be read. Check Settings → Providers → Vision.`, { kind: 'err' });
+        } else {
+          this.push('note', `${res.provider || 'The model'} answered without seeing the attached image(s) — no vision model in the Overseer or Vision route could read them. Check Settings → Providers.`, { kind: 'err' });
+        }
       }
       return this.readReply(res, usage);
     },

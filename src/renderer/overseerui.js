@@ -95,7 +95,9 @@
         const r = await window.ala.llm.route('overseer');
         this._vision = !!(r && r.vision);
         this._visionNames = (r && r.visionProviders) || [];
+        this._describedBy = (r && r.describedBy) || [];
       } catch {
+        this._describedBy = [];
         this._vision = false;
         this._visionNames = [];
       }
@@ -103,7 +105,7 @@
       if (btn) {
         btn.disabled = !this._vision;
         btn.title = this._vision
-          ? `Attach images — paste or drop works too. Read by ${this._visionNames.join(' → ')}.`
+          ? `Attach images — paste or drop works too. Read by ${this._visionNames.join(' → ') || '—'}${this._describedBy.length ? `; text-only models get a description from ${this._describedBy.join(' → ')}` : ''}.`
           : 'No vision-capable model is routed to the Overseer. In Settings → Providers, tick "can see images" on a provider that can, and put it in the Overseer route.';
       }
       return this._vision;

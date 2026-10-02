@@ -178,6 +178,10 @@ function describeRoute(settings, role) {
   });
   const chain = ordered.filter((x) => x.eligible);
   const skipped = ordered.filter((x) => !x.eligible);
+  // Text-only links can still take pictures when a vision route exists to describe them.
+  const describedBy = role !== 'vision' && chain.some((c) => !c.vision)
+    && !(settings && settings.routing && settings.routing.describeImagesForTextModels === false)
+    ? describeRoute(settings, 'vision').chain.map((c) => c.name) : [];
   return {
     role,
     order: ordered,
@@ -187,8 +191,9 @@ function describeRoute(settings, role) {
     leadTier: chain.length ? chain[0].tier : null,
     cloudFirst: !!(chain.length && chain[0].tier !== 'local'),
     usesCloud: chain.some((c) => c.tier !== 'local'),
-    vision: chain.some((c) => c.vision),
+    vision: chain.some((c) => c.vision) || !!describedBy.length,
     visionProviders: chain.filter((c) => c.vision).map((c) => c.name),
+    describedBy,
   };
 }
 
@@ -210,6 +215,80 @@ function stripImages(messages) {
     }).filter(Boolean).join('\n');
     return { ...m, content: text };
   });
+}
+
+/**
+ * Pictures turned into words for a text-only model.
+ *
+ * When the model answering a role cannot see images, the vision route reads each attached
+ * picture once and the text model receives that description in its place, so it can still
+ * talk about the picture. Descriptions are cached by content: the Overseer re-sends its
+ * newest pictures on every step, and each picture costs one vision call per session.
+ */
+const DESCRIBE_PROMPT = 'Describe this image for a collaborator who cannot see it. Be concrete: '
+  + 'who or what it shows (name the character and franchise if you recognise them), hair, eyes, '
+  + 'clothing, pose, expression, setting, lighting, composition and art style; any visible text. '
+  + 'Under 160 words. Reply with one JSON object: {"description": "..."}';
+const describeCache = new Map();
+const DESCRIBE_CACHE_MAX = 64;
+const DESCRIBE_RETRY_MS = 5 * 60 * 1000;
+
+function describeKey(url) {
+  return require('node:crypto').createHash('sha1').update(String(url)).digest('hex');
+}
+
+/**
+ * `messages` with every image part replaced by a vision-model description. A picture the
+ * vision route could not read gets the plain stripImages note instead.
+ * Returns `{ messages, describedBy, described, failed }`.
+ */
+async function describeImages(settings, messages) {
+  const opt = (settings && settings.routing) || {};
+  if (opt.describeImagesForTextModels === false || !chainFor(settings, 'vision').length) {
+    return { messages: stripImages(messages), describedBy: '', described: 0, failed: 0 };
+  }
+  let described = 0, failed = 0, describedBy = '';
+  const out = [];
+  for (const m of messages || []) {
+    if (!m || !Array.isArray(m.content)) { out.push(m); continue; }
+    const parts = [];
+    for (const p of m.content) {
+      if (!p || p.type !== 'image_url') { if (p) parts.push(p); continue; }
+      const url = String((p.image_url && p.image_url.url) || '');
+      const hit = /^data:([^;]+);base64,(.+)$/s.exec(url);
+      const key = describeKey(url);
+      let got = describeCache.get(key);
+      // A picture that just failed is retried only after a few minutes, not on every step.
+      // null = failed recently (skip), undefined = ask the vision route now.
+      if (got && got.failedAt) got = Date.now() - got.failedAt < DESCRIBE_RETRY_MS ? null : undefined;
+      if (got === undefined && hit) {
+        try {
+          const r = await vision(settings, hit[2], hit[1], DESCRIBE_PROMPT, { role: 'vision', maxTokens: 1500, temperature: 0.2 });
+          let text = '';
+          try { text = String(extractJson(r.text).description || ''); } catch { text = String(r.text || ''); }
+          text = text.replace(/\s+/g, ' ').trim().slice(0, 1600);
+          if (text) {
+            got = { text, by: `${r.provider}${r.model ? ` (${r.model})` : ''}` };
+            describeCache.set(key, got);
+            if (describeCache.size > DESCRIBE_CACHE_MAX) describeCache.delete(describeCache.keys().next().value);
+          }
+        } catch { /* falls back to the plain note below */ }
+        if (!got) {
+          describeCache.set(key, { failedAt: Date.now() });
+          if (describeCache.size > DESCRIBE_CACHE_MAX) describeCache.delete(describeCache.keys().next().value);
+        }
+      }
+      if (got && got.text) {
+        described++; describedBy = describedBy || got.by;
+        parts.push({ type: 'text', text: `[Picture — you cannot see images, so the vision model ${got.by} looked at it for you: ${got.text}]` });
+      } else {
+        failed++;
+        parts.push({ type: 'text', text: '[An image was attached here, but the model answering now cannot see images and no vision model could describe it. Say so if the request depends on it.]' });
+      }
+    }
+    out.push({ ...m, content: parts.map((x) => (x.type === 'text' ? x.text || '' : '')).filter(Boolean).join('\n') });
+  }
+  return { messages: out, describedBy, described, failed };
 }
 
 /** Did the model decline instead of answering? */
@@ -501,21 +580,45 @@ async function withFallback(settings, role, buildMessages, opts) {
   const notes = [];
   let lastError = null;
   const withPictures = role !== 'vision' && hasImages(buildMessages(chain[0]));
+  // Vision fallback (default on): a text-only link keeps its place in the chosen order and
+  // receives the pictures as descriptions written by the vision route. Without a vision
+  // route (or with routing.describeImagesForTextModels:false) the links that can see go
+  // first and text-only links get a short note that a picture was there.
+  const describe = withPictures && !(settings && settings.routing && settings.routing.describeImagesForTextModels === false)
+    && chainFor(settings, 'vision').length > 0;
+  let described = null; // filled once, on the first text-only link that is reached
   if (withPictures) {
-    const seeing = chain.filter((ep) => ep.vision);
-    const blind = chain.filter((ep) => !ep.vision);
-    chain = [...seeing, ...blind.map((ep) => ({ ...ep, _stripImages: true }))];
+    if (describe) {
+      chain = chain.map((ep) => (ep.vision ? ep : { ...ep, _describeImages: true }));
+    } else {
+      const seeing = chain.filter((ep) => ep.vision);
+      const blind = chain.filter((ep) => !ep.vision);
+      chain = [...seeing, ...blind.map((ep) => ({ ...ep, _stripImages: true }))];
+    }
   }
   const rerouteOnPolicy = !(settings && settings.routing && settings.routing.rerouteOnPolicyRefusal === false);
 
-  for (const ep of chain) {
+  for (let i = 0; i < chain.length; i++) {
+    const ep = chain[i];
     if (circuitOpen(ep.id, role)) {
       notes.push(`${ep.name} refused ${REFUSAL_LIMIT}x, skipped`);
       continue;
     }
     const t0 = Date.now();
-    const built = buildMessages(ep);
-    const r = await attempt(ep, ep._stripImages ? stripImages(built) : built, opts);
+    let built = buildMessages(ep);
+    if (ep._stripImages) built = stripImages(built);
+    else if (ep._describeImages) {
+      if (!described) described = await describeImages(settings, built);
+      // Nothing could be described: let the links that can see go first, and come back to
+      // this one (told only that a picture was there) at the end.
+      if (!described.described && chain.slice(i + 1).some((x) => x.vision)) {
+        notes.push(`${ep.name} cannot see and no vision model described the picture(s), tried later`);
+        chain.push({ ...ep, _describeImages: false, _stripImages: true });
+        continue;
+      }
+      built = described.messages;
+    }
+    const r = await attempt(ep, built, opts);
     // A tool call is an answer. A native-tools reply without one is prose on purpose.
     const called = r.ok && Array.isArray(r.result.toolCalls) && r.result.toolCalls.length > 0;
     const native = r.ok && r.result.nativeTools === true;
@@ -534,7 +637,14 @@ async function withFallback(settings, role, buildMessages, opts) {
         model: ep.model,
         latencyMs: Date.now() - t0,
         notes,
-        sawImages: withPictures ? !ep._stripImages : null,
+        sawImages: withPictures ? !(ep._stripImages || ep._describeImages) : null,
+        // A text-only answer that got the pictures as words: who described them, and how
+        // many could not be read (those reached the model as a short note).
+        ...(ep._describeImages && described ? {
+          imagesDescribedBy: described.describedBy,
+          imagesDescribed: described.described,
+          imagesUndescribed: described.failed,
+        } : {}),
       };
     }
     if (r.ok) {
@@ -715,7 +825,9 @@ module.exports = {
   chat, vision, extractJson, listModels, status, testProvider,
   chainFor, describeRoute, localProvider, isRefusal, isPolicyRefusal, resetCircuit,
   isNativeRefusal, isNativePolicyRefusal, readToolCalls, applyJsonFallback,
-  hasImages, stripImages,
+  hasImages, stripImages, describeImages,
+  // Tests reset the per-session description cache between cases.
+  _clearDescribeCache: () => describeCache.clear(),
   probeCommand,
   LlmError, ROLES,
 };

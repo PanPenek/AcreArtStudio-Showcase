@@ -691,9 +691,12 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
 
     /** Resolve a researched job's compact ids into transient bytes for ComfyUI. */
     async researchReferences(job) {
-      const limit = window.ComfyUI?.referenceLimit
+      const ceiling = window.ComfyUI?.referenceLimit
         ? window.ComfyUI.referenceLimit(State.settings && State.settings.comfy)
         : 8;
+      // A job may ask for fewer references than the setting allows (Overseer.assignReferences).
+      const perJob = Math.floor(Number(job.referenceCount));
+      const limit = perJob > 0 ? Math.min(perJob, ceiling) : ceiling;
       const ids = [...new Set((Array.isArray(job.referenceIds) ? job.referenceIds : [])
         .map(String).filter(Boolean))].slice(0, limit);
       if (!ids.length) return [];
