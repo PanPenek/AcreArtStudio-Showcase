@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="src/assets/icon.png" width="96" alt="AiLabor Art Studio icon">
+<img src="src/assets/icon.png" width="96" alt="Acre Art Studio icon">
 
-# AiLabor Art Studio
+# Acre Art Studio
 
 **An AI art studio that runs on your own computer.**
 You describe what you want to make. The app writes the prompts, generates the images,
@@ -43,7 +43,7 @@ and look closely at each one for broken hands or garbled text. Then you pick the
 think of a title, write a description, choose tags, and upload it. After that you check how
 it did and use that to decide what to make next.
 
-**AiLabor Art Studio automates the boring parts of that chain and leaves the decisions to you.**
+**Acre Art Studio automates the boring parts of that chain and leaves the decisions to you.**
 
 Think of it as a small studio team that lives inside one desktop app:
 
@@ -152,7 +152,7 @@ flowchart LR
 ### Windows (the easy way)
 
 1. Click **Code → Download ZIP** on this page and unzip it anywhere, or
-   `git clone https://github.com/PanPenek/AiLaborAutomation-Showcase.git`
+   `git clone https://github.com/PanPenek/AcreArtStudio-Showcase.git`
 2. Double-click **`install.bat`**. It installs Node.js if needed and the app's single
    dependency (Electron, about 100 MB), then asks a few questions about AI models (below).
 3. Double-click **`start.bat`**.
@@ -201,8 +201,8 @@ time with `npm run setup`; `npm run setup -- --dry-run` shows the plan without d
 ### macOS / Linux
 
 ```bash
-git clone https://github.com/PanPenek/AiLaborAutomation-Showcase.git
-cd AiLaborAutomation-Showcase
+git clone https://github.com/PanPenek/AcreArtStudio-Showcase.git
+cd AcreArtStudio-Showcase
 ./install.sh
 npm start
 ```
@@ -313,7 +313,7 @@ app can't reach the file system. A full module-by-module map is in
 ### Data and privacy
 
 - All data (settings, library, statistics) lives in the operating system's per-user app
-  folder (`%APPDATA%\AiLabor Art Studio\` on Windows), **never in the project folder**.
+  folder (`%APPDATA%\Acre Art Studio\` on Windows), **never in the project folder**.
   This repository contains no user data.
 - API keys you enter stay on your machine in that folder. The repository ships with none.
 - Web research is read-only, capped in size and type, and refuses private network addresses.
@@ -323,7 +323,7 @@ app can't reach the file system. A full module-by-module map is in
 ## Project layout
 
 ```
-AiLaborAutomation-Showcase/
+AcreArtStudio-Showcase/
 ├── install.bat / install.sh     one-click setup (Node.js + Electron, then tools/setup.mjs)
 ├── start.bat                    launch on Windows
 ├── package.json                 npm start · npm test
@@ -404,7 +404,7 @@ Newer npm versions can skip Electron's download step. This project allows it in
 
 Copyright © 2026 PanPenek
 
-AiLabor Art Studio is free software, licensed under the
+Acre Art Studio is free software, licensed under the
 **GNU General Public License v3.0**. See [LICENSE](LICENSE).
 
 In short:

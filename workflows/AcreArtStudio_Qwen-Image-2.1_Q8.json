@@ -273,13 +273,13 @@
    "mode": 0,
    "inputs": [],
    "outputs": [],
-   "title": "Note: How AiLabor Art Studio uses this",
+   "title": "Note: How Acre Art Studio uses this",
    "properties": {},
    "widgets_values": [
-    "## Text + reference images\n\nAiLabor Art Studio generates and edits pictures with this file (Settings -> Generator).\n\n- **Text to image**: the reference sockets stay empty; nothing extra is added.\n- **Edit / references**: the app uploads the picture(s) to ComfyUI and wires them to **reference_1 ... reference_N** on a temporary copy of this graph, so the file itself never changes.\n\nDefaults: 40 steps, euler / simple, CFG 1, 1024 x 1024. Each reference costs extra time and VRAM."
+    "## Text + reference images\n\nAcre Art Studio generates and edits pictures with this file (Settings -> Generator).\n\n- **Text to image**: the reference sockets stay empty; nothing extra is added.\n- **Edit / references**: the app uploads the picture(s) to ComfyUI and wires them to **reference_1 ... reference_N** on a temporary copy of this graph, so the file itself never changes.\n\nDefaults: 40 steps, euler / simple, CFG 1, 1024 x 1024. Each reference costs extra time and VRAM."
    ],
    "widgets_values_named": {
-    "text": "## Text + reference images\n\nAiLabor Art Studio generates and edits pictures with this file (Settings -> Generator).\n\n- **Text to image**: the reference sockets stay empty; nothing extra is added.\n- **Edit / references**: the app uploads the picture(s) to ComfyUI and wires them to **reference_1 ... reference_N** on a temporary copy of this graph, so the file itself never changes.\n\nDefaults: 40 steps, euler / simple, CFG 1, 1024 x 1024. Each reference costs extra time and VRAM."
+    "text": "## Text + reference images\n\nAcre Art Studio generates and edits pictures with this file (Settings -> Generator).\n\n- **Text to image**: the reference sockets stay empty; nothing extra is added.\n- **Edit / references**: the app uploads the picture(s) to ComfyUI and wires them to **reference_1 ... reference_N** on a temporary copy of this graph, so the file itself never changes.\n\nDefaults: 40 steps, euler / simple, CFG 1, 1024 x 1024. Each reference costs extra time and VRAM."
    },
    "color": "#222",
    "bgcolor": "#000"

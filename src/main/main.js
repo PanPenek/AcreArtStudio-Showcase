@@ -38,6 +38,14 @@ let powerBlockerId = null;
 let patreonMedia = null;
 const START_HIDDEN = process.argv.includes('--start-hidden');
 
+// Installs from before the rename to Acre Art Studio keep their data folder;
+// new installs use %APPDATA%\Acre Art Studio.
+const legacyData = path.join(app.getPath('appData'), 'AiLabor Art Studio');
+if (fs.existsSync(legacyData)) {
+  app.setPath('userData', legacyData);
+  app.setPath('sessionData', legacyData);
+}
+
 const reviewMarker = path.join(__dirname, '..', '..', '.ala-review.json');
 const REVIEW_MODE = fs.existsSync(reviewMarker);
 if (REVIEW_MODE) {
@@ -45,13 +53,13 @@ if (REVIEW_MODE) {
   const reviewData = path.resolve(marker.userData || '');
   const productionData = path.resolve(app.getPath('userData'));
   if (!marker.userData || reviewData.toLowerCase() === productionData.toLowerCase()
-      || path.basename(reviewData).toLowerCase() !== 'ailaborautomation-review') {
+      || path.basename(reviewData).toLowerCase() !== 'acreartstudio-review') {
     throw new Error('Unsafe review data directory; refusing to start.');
   }
   fs.mkdirSync(reviewData, { recursive: true });
   app.setPath('userData', reviewData);
   app.setPath('sessionData', reviewData);
-  app.setName('AiLaborAutomation Review');
+  app.setName('Acre Art Studio Review');
 }
 
 const single = app.requestSingleInstanceLock();
@@ -111,7 +119,7 @@ function createWindow() {
     minHeight: 720,
     show: !startHidden,
     backgroundColor: '#0c0a09',
-    title: REVIEW_MODE ? 'AiLaborAutomation — REVIEW COPY (production unchanged)' : 'AiLaborAutomation',
+    title: REVIEW_MODE ? 'Acre Art Studio — REVIEW COPY (production unchanged)' : 'Acre Art Studio',
     icon: path.join(__dirname, '..', 'assets', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -757,7 +765,7 @@ function registerIpc() {
   /** OS notification. */
   h('app:notify', (_e, { title, body }) => {
     if (!Notification.isSupported()) return false;
-    const n = new Notification({ title: String(title || 'AiLaborAutomation'), body: String(body || '') });
+    const n = new Notification({ title: String(title || 'Acre Art Studio'), body: String(body || '') });
     n.on('click', () => { if (win && !win.isDestroyed()) { win.show(); win.focus(); } });
     n.show();
     return true;

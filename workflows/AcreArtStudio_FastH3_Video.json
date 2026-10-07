@@ -170,10 +170,10 @@
    "title": "Note: FastH3 image to video",
    "properties": {},
    "widgets_values": [
-    "## FastH3 4-step (VSA), image to video with sound\n\nMiniMax H3 distilled to 4 steps by FastVideo; ComfyUI conversion by Kijai.\n\nAiLabor Art Studio puts the approved picture into **Load Image -> first_frame** and writes the motion prompt, so this file is used as-is. Needs **16-24 GB of VRAM**; a 10-second 640 x 640 clip takes about 90 s on an RTX 3090.\n\n**Keep these as they are (inside the subgraph):** 4 steps, euler, simple, CFG 1, sigma shift 12 / 3, Block Sparse Attention **vsa** with start_percent 0."
+    "## FastH3 4-step (VSA), image to video with sound\n\nMiniMax H3 distilled to 4 steps by FastVideo; ComfyUI conversion by Kijai.\n\nAcre Art Studio puts the approved picture into **Load Image -> first_frame** and writes the motion prompt, so this file is used as-is. Needs **16-24 GB of VRAM**; a 10-second 640 x 640 clip takes about 90 s on an RTX 3090.\n\n**Keep these as they are (inside the subgraph):** 4 steps, euler, simple, CFG 1, sigma shift 12 / 3, Block Sparse Attention **vsa** with start_percent 0."
    ],
    "widgets_values_named": {
-    "text": "## FastH3 4-step (VSA), image to video with sound\n\nMiniMax H3 distilled to 4 steps by FastVideo; ComfyUI conversion by Kijai.\n\nAiLabor Art Studio puts the approved picture into **Load Image -> first_frame** and writes the motion prompt, so this file is used as-is. Needs **16-24 GB of VRAM**; a 10-second 640 x 640 clip takes about 90 s on an RTX 3090.\n\n**Keep these as they are (inside the subgraph):** 4 steps, euler, simple, CFG 1, sigma shift 12 / 3, Block Sparse Attention **vsa** with start_percent 0."
+    "text": "## FastH3 4-step (VSA), image to video with sound\n\nMiniMax H3 distilled to 4 steps by FastVideo; ComfyUI conversion by Kijai.\n\nAcre Art Studio puts the approved picture into **Load Image -> first_frame** and writes the motion prompt, so this file is used as-is. Needs **16-24 GB of VRAM**; a 10-second 640 x 640 clip takes about 90 s on an RTX 3090.\n\n**Keep these as they are (inside the subgraph):** 4 steps, euler, simple, CFG 1, sigma shift 12 / 3, Block Sparse Attention **vsa** with start_percent 0."
    },
    "color": "#222",
    "bgcolor": "#000"

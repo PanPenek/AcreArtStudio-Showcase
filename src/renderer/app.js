@@ -3365,7 +3365,7 @@
       harvestBusy = true;
       try {
         const found = await checkStagedPixiv(staged);
-        if (found) notifyIfAway('AiLabor — posted to pixiv', staged.metadata?.title || staged.fname);
+        if (found) notifyIfAway('Acre Art Studio — posted to pixiv', staged.metadata?.title || staged.fname);
         else if (stale) Pipeline.clearPixivPrep(staged, 'the app restarted, so the form is no longer filled in');
       } catch { } finally {
         harvestBusy = false;
@@ -3507,7 +3507,7 @@
     if (bare) parts.push(`${bare} skipped for having no metadata`);
     const bad = tally.rejected || tally.retrying || tally.notSubmitted;
     toast(`Publish pass complete — ${parts.join(', ')}.`, bad ? 'err' : 'ok');
-    notifyIfAway('AiLabor — publish pass complete', parts.join(', ') + '.');
+    notifyIfAway('Acre Art Studio — publish pass complete', parts.join(', ') + '.');
   }
 
   /** Say what happened on each site, in one toast. */

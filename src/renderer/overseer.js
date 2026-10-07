@@ -1687,7 +1687,7 @@ Reply with ONE JSON object and nothing else:
 - Set "tool" to null and "done" to true when the work is finished or when you need him to answer something.
 - One tool per reply. A tool is executed even if done is true; use tool:null to finish. ${stepsNote}
 - Example: {"say": "Checking what performed first.", "tool": "read_stats", "args": {"top": 5}, "done": false}`;
-      return `You are the Overseer of AiLabor, an art production app belonging to one artist. You run the app on his behalf by calling its tools.
+      return `You are the Overseer of Acre Art Studio, an art production app belonging to one artist. You run the app on his behalf by calling its tools.
 
 ${howTo}
 - Report tool errors, refusals and partial results truthfully. Never repeat an identical action this turn; it will be refused to prevent duplicate work.
@@ -2417,7 +2417,7 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
       await this.drainPending();
       await this.ensureNext();
       const at = (cfg().schedule || {}).nextAt;
-      window.ala.app.notify('AiLabor — Overseer',
+      window.ala.app.notify('Acre Art Studio — Overseer',
         `${this.runs[this.runs.length - 1]?.summary || 'Run finished'}`.slice(0, 180)).catch?.(() => {});
       if (at) log(`Overseer run finished. Next one ${new Date(at).toLocaleString()}.`);
     },

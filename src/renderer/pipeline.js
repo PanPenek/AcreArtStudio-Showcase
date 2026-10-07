@@ -1037,7 +1037,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           if (!job) {
             if (jobsDone > 0 && !this.laneImages()) {
               const waiting = State.library.filter((c) => c.status === 'review').length;
-              osNotify('AiLabor — queue finished',
+              osNotify('Acre Art Studio — queue finished',
                 `${jobsDone} job(s) done. ${waiting} card(s) waiting in Review.`);
               jobsDone = 0;
             }
@@ -1235,7 +1235,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           if (!this.engineDown) {
             this.engineDown = { since: Date.now(), error: e.message };
             log(`Image engine unreachable — ${e.message}. The job is kept; generation resumes by itself when it answers again.`, 'err');
-            osNotify('AiLabor — image engine unreachable', e.message);
+            osNotify('Acre Art Studio — image engine unreachable', e.message);
           } else {
             this.engineDown.error = e.message;
           }
@@ -2930,7 +2930,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         this.setStatus(this.stopReason ? `Stopped — ${this.stopReason}` : 'Stopped');
         log(`Auto mode stopped${this.stopReason ? ` — ${this.stopReason}` : ''}. `
           + `${this.settings.roundsDone} round(s), ${this.reviewBacklog()} card(s) waiting in Review.`, 'ok');
-        osNotify('AiLabor — auto mode stopped',
+        osNotify('Acre Art Studio — auto mode stopped',
           `${this.stopReason || 'stopped'} · ${this.settings.roundsDone} round(s), `
           + `${this.reviewBacklog()} card(s) waiting in Review.`);
       }

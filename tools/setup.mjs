@@ -74,14 +74,14 @@ const QWEN_VAE = ['vae', 'qwen_image_2.1_vae_bf16.safetensors',
   HF + 'Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors',
   675509688, 'bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9'];
 const IMAGE = {
-  Q8: { label: 'Quality', vram: 8, workflow: 'AiLabor_Qwen-Image-2.1_Q8.json', files: [
+  Q8: { label: 'Quality', vram: 8, workflow: 'AcreArtStudio_Qwen-Image-2.1_Q8.json', files: [
     ['diffusion_models', 'qwen_image_2.1_Q8_0.gguf', HF + 'AlperKTS/Qwen-Image-2.1-GGUF/resolve/main/qwen_image_2.1_Q8_0.gguf',
       7624265888, '5f006f64227315a45f3c7f1a134306cb2b86dcdc3372e176f019bd329740c36d'], QWEN_TE, QWEN_VAE] },
-  Q4: { label: 'Balanced', vram: 5, workflow: 'AiLabor_Qwen-Image-2.1_Q4.json', files: [
+  Q4: { label: 'Balanced', vram: 5, workflow: 'AcreArtStudio_Qwen-Image-2.1_Q4.json', files: [
     ['diffusion_models', 'qwen_image_2.1_Q4_K_M.gguf', HF + 'Abiray/Qwen-Image-2.1-GGUF/resolve/main/qwen_image_2.1_Q4_K_M.gguf',
       4189343904, 'dc956c958fbfa1d5c64ec316d7e865283d17d97a9eb332a4a74a4d63afaae9a5'], QWEN_TE, QWEN_VAE] },
 };
-const VIDEO = { workflow: 'AiLabor_FastH3_Video.json', files: [
+const VIDEO = { workflow: 'AcreArtStudio_FastH3_Video.json', files: [
   ['diffusion_models', 'minimax_h3_fastvideo_vsa_datafree_1300step_4step_int8_convrot.safetensors',
     HF + 'Kijai/MiniMax-H3-experimental/resolve/main/minimax_h3_fastvideo_vsa_datafree_1300step_4step_int8_convrot.safetensors',
     22898594920, '7221ae65d78780354d51e5048d29728d9f1f8fb9baf50b1dd3df85f5101413d3'],
@@ -307,7 +307,7 @@ async function comfyRelease(vendor) {
   const asset = vendor === 'amd' ? 'ComfyUI_windows_portable_amd.7z'
     : vendor === 'intel' ? 'ComfyUI_windows_portable_intel.7z' : 'ComfyUI_windows_portable_nvidia.7z';
   try {
-    const r = await fetch('https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest', { headers: { 'User-Agent': 'ailabor-setup' } });
+    const r = await fetch('https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest', { headers: { 'User-Agent': 'acre-art-studio-setup' } });
     const j = await r.json();
     const a = (j.assets || []).find((x) => x.name === asset);
     if (a && a.digest && a.digest.startsWith('sha256:')) {
@@ -414,7 +414,7 @@ function writeAppSettings(patch) {
 
 // ------------------------------------------------------------------ main flow
 async function main() {
-  say('\nAiLabor Art Studio setup' + (DRY ? ' (dry run: nothing is downloaded or changed)' : ''));
+  say('\nAcre Art Studio setup' + (DRY ? ' (dry run: nothing is downloaded or changed)' : ''));
   say('========================');
   const gpu = detectGpu();
   say(gpu.vramGB ? `Graphics card: ${gpu.name}, ${gpu.vramGB.toFixed(1)} GB of VRAM`

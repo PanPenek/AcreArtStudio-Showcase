@@ -1,9 +1,9 @@
 @echo off
 setlocal
-title AiLabor Art Studio - installer
+title Acre Art Studio - installer
 cd /d "%~dp0"
 echo.
-echo  AiLabor Art Studio - installer
+echo  Acre Art Studio - installer
 echo  ==============================
 echo  Step 1 of 2: the app itself (Node.js + Electron)
 echo.

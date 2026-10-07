@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AiLabor Art Studio installer for macOS / Linux.
+# Acre Art Studio installer for macOS / Linux.
 # Step 1 installs the app; step 2 (tools/setup.mjs) picks and downloads an AI model for LM Studio.
 # ComfyUI is installed automatically on Windows only; setup.mjs prints the manual steps elsewhere.
 set -e

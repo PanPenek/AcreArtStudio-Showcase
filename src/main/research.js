@@ -13,8 +13,8 @@
 const dns = require('dns').promises;
 const net = require('net');
 
-const USER_AGENT = 'AiLaborAutomation/1.0 (local desktop research; +https://github.com/)';
-const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36 AiLaborAutomation/1.0';
+const USER_AGENT = 'AcreArtStudio/1.0 (local desktop research; +https://github.com/)';
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36 AcreArtStudio/1.0';
 const HTML_LIMIT = 2 * 1024 * 1024;
 const JSON_LIMIT = 2 * 1024 * 1024;
 const IMAGE_LIMIT = 12 * 1024 * 1024;
