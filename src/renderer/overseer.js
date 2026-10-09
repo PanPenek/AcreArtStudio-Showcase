@@ -89,7 +89,7 @@
       .map((alts) => alts.join(' or '));
   }
   // Argument keys that are numbers, booleans or lists whatever the model typed.
-  const NUM_KEYS = new Set(['top', 'limit', 'count', 'webLimit', 'imageLimit', 'referenceCount', 'seconds', 'minutes', 'passThreshold', 'maxRetries']);
+  const NUM_KEYS = new Set(['top', 'limit', 'count', 'webLimit', 'imageLimit', 'referenceCount', 'seconds', 'minutes', 'passThreshold', 'maxRetries', 'qcRetries']);
   const BOOL_KEYS = new Set(['fresh', 'first', 'original', 'skipQc', 'skipMetadata', 'cycleReferences']);
   const LIST_KEYS = new Set(['ids', 'imageIds', 'referenceImages', 'order']);
 
@@ -520,8 +520,8 @@
       },
     },
     pipeline_settings: {
-      args: '{"passThreshold": 5, "skipQc": false, "skipMetadata": true, "maxRetries": 2}',
-      what: 'Change how the pipeline runs. passThreshold is the QC score 1-10 an image must reach — LOWER IS LESS STRICT. skipQc turns the vision inspection off entirely so every image goes straight to Review. skipMetadata turns off automatic titles. maxRetries is how many times a job regenerates when all its images fail. Send only the keys you are changing; send none to read the current values. Use this whenever the artist asks to be more or less strict, or to turn the inspection on or off.',
+      args: '{"passThreshold": 5, "skipQc": false, "skipMetadata": true, "maxRetries": 2, "qcRetries": 0}',
+      what: 'Change how the pipeline runs. passThreshold is the QC score 1-10 an image must reach — LOWER IS LESS STRICT. skipQc turns the vision inspection off entirely so every image goes straight to Review. skipMetadata turns off automatic titles. maxRetries is how many times a job tries again after an error. qcRetries is how many times a job re-renders its prompt when ALL its images fail QC (0 = never; the default). Send only the keys you are changing; send none to read the current values. Use this whenever the artist asks to be more or less strict, or to turn the inspection on or off.',
       run: (a) => Overseer.changePipeline(a),
     },
   };
@@ -1691,11 +1691,12 @@
           skipQc: !!g.skipQc,
           skipMetadata: !!g.skipMetadata,
           maxRetries: g.maxRetries,
+          qcRetries: Number(g.qcRetries) || 0,
         };
       };
       const before = cur();
       const bool = (v) => v === true || v === 'true';
-      const given = ['passThreshold', 'skipQc', 'skipMetadata', 'maxRetries']
+      const given = ['passThreshold', 'skipQc', 'skipMetadata', 'maxRetries', 'qcRetries']
         .filter((k) => a[k] !== undefined && a[k] !== null);
       if (!given.length) {
         return { ok: true, current: before, note: 'nothing was changed — these are the current values' };
@@ -1706,9 +1707,9 @@
           const n = Math.round(Number(a[k]));
           if (!Number.isFinite(n)) return { ok: false, error: `passThreshold must be a number 1-10, got ${JSON.stringify(a[k])}` };
           patch[k] = clamp(n, 1, 10);
-        } else if (k === 'maxRetries') {
+        } else if (k === 'maxRetries' || k === 'qcRetries') {
           const n = Math.round(Number(a[k]));
-          if (!Number.isFinite(n)) return { ok: false, error: `maxRetries must be a number 0-5, got ${JSON.stringify(a[k])}` };
+          if (!Number.isFinite(n)) return { ok: false, error: `${k} must be a number 0-5, got ${JSON.stringify(a[k])}` };
           patch[k] = clamp(n, 0, 5);
         } else {
           patch[k] = bool(a[k]);

@@ -127,6 +127,7 @@ contextBridge.exposeInMainWorld('ala', {
     listWorkflows: (dir) => invoke('comfy:listWorkflows', dir),
     readWorkflow: (payload) => invoke('comfy:readWorkflow', payload),
     pickDir: () => invoke('comfy:pickDir'),
+    detect: (payload) => invoke('comfy:detect', payload || {}),
     downloadVideo: (payload) => invoke('comfy:downloadVideo', payload),
     deleteVideo: (fname) => invoke('comfy:deleteVideo', { fname }),
     videoToGif: (payload) => invoke('comfy:videoToGif', payload),

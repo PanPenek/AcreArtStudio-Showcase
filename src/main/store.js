@@ -102,6 +102,10 @@ const DEFAULT_SETTINGS = {
     engine: 'perchance',
     batchSize: 4,
     maxRetries: 2,
+    // When EVERY picture of a prompt fails QC: render the prompt again this many times.
+    // Off by default: a vision model that wrongly flags clean hands (deepseek-v4-flash does on
+    // most frames) otherwise burns GPU re-rendering good work the artist never asked to redo.
+    qcRetries: 0,
     maxUploadRetries: 3,
     passThreshold: 7,
     qcVeto: true,

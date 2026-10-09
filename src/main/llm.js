@@ -572,10 +572,22 @@ async function attempt(endpoint, messages, opts) {
 }
 
 /** Walk the role's chain and return the first genuine answer. */
-async function withFallback(settings, role, buildMessages, opts) {
+async function withFallback(settings, role, buildMessages, opts, routeOpts = {}) {
   let chain = chainFor(settings, role);
   if (!chain.length) {
     throw new LlmError(`no provider is configured for the ${role || 'chat'} role — check Settings → Providers & routing`, 0);
+  }
+  // A second opinion has to come from another model: the same model asked again repeats
+  // itself (measured: deepseek-v4-flash gave the identical hands/merges NO on 10 of 10 frames
+  // it had just vetoed, clean ones included). `avoid` sends the call to the other links
+  // first; `strict` refuses to fall back to the avoided model at all.
+  if (routeOpts.avoid && routeOpts.avoid.id) {
+    const same = (ep) => ep.id === routeOpts.avoid.id && String(ep.model || '') === String(routeOpts.avoid.model || '');
+    const others = chain.filter((ep) => !same(ep));
+    chain = routeOpts.strict ? others : [...others, ...chain.filter(same)];
+    if (!chain.length) {
+      throw new LlmError(`no other ${role || 'chat'} engine is configured for an independent look (only ${routeOpts.avoid.model || routeOpts.avoid.id})`, 0);
+    }
   }
   const notes = [];
   let lastError = null;
@@ -688,12 +700,12 @@ async function vision(settings, imageBase64, mime, promptText, opts = {}) {
       ],
     },
   ];
-  const { role, ...rest } = opts;
+  const { role, avoid, avoidStrict, ...rest } = opts;
   return withFallback(settings, role || 'vision', () => messages, {
     temperature: 0.2,
     maxTokens: (settings.lmStudio && settings.lmStudio.visionMaxTokens) || 12000,
     ...rest,
-  });
+  }, { avoid, strict: !!avoidStrict });
 }
 
 /** Extract the first balanced JSON object/array from a model response. */

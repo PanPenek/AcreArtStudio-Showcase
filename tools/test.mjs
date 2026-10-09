@@ -14,6 +14,9 @@
  *   - imageedit.js    : brushed areas in words, repairs from QC findings, edit vs re-render
  *   - comfy.js        : image edits keep the source picture's size
  *   - navorder.js     : the saved sidebar order, with new tabs slotted in
+ *   - teach.js        : pictures marked good feed the playbook; forgetting one removes its lessons
+ *   - pipeline.js     : a disputed QC veto goes to Review, a confirmed one does not
+ *   - comfyfind.js    : an installed ComfyUI (Comfy Desktop, portable) is found on disk
  */
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -189,6 +192,109 @@ console.log('navorder.js');
     assert.equal(w.NavOrder.merge(shipped, ['gone', 'review', 'review']).join(), 'dashboard,review,imageedit,drafts,settings');
     assert.equal(w.NavOrder.merge(shipped, null).join(), shipped.join());
   });
+}
+
+console.log('teach.js');
+{
+  const w = load({ Insights: { playbook: null, persistPlaybook() {} } }, 'teach.js');
+  w.U = { uid: (() => { let n = 0; return () => 'u' + (++n); })() };
+  test('a good example adds its lessons and reaches the guidance block', () => {
+    const ex = w.Teach.addExample({ cardId: 'c1', fname: 'a.png', note: 'the window light', summary: 'soft window light portrait',
+      traits: ['warm rim light'], lessons: [{ text: 'Light the subject from a window behind them', why: 'rim light' }] });
+    const m = w.Teach.manual();
+    assert.equal(m.examples.length, 1);
+    assert.equal(m.lessons.filter((l) => l.exampleId === ex.id).length, 1);
+    const block = w.Teach.block();
+    assert.ok(block.includes('Light the subject from a window behind them'), block);
+    assert.ok(block.includes('marked GOOD') && block.includes('the window light'), block);
+    assert.equal(w.Teach.isEmpty(), false);
+  });
+  test('marking the same picture again replaces it; forgetting it removes its lessons', () => {
+    w.Teach.addExample({ cardId: 'c1', fname: 'a.png', lessons: [{ text: 'second reading' }] });
+    let m = w.Teach.manual();
+    assert.equal(m.examples.length, 1);
+    assert.equal(JSON.stringify(m.lessons.map((l) => l.text)), '["second reading"]');
+    w.Teach.removeExample(m.examples[0].id);
+    m = w.Teach.manual();
+    assert.equal(m.examples.length + m.lessons.length, 0);
+  });
+}
+
+console.log('pipeline.js (QC veto)');
+{
+  const gen = { passThreshold: 7, qcVeto: true, qcConfirmVeto: true, qcGeneralPass: true, qcMetrics: false };
+  const w = load({ State: { settings: { gen, metadata: {}, comfy: {} }, library: [] }, document: { createElement: () => ({}) } },
+    'state.js', 'pipeline.js');
+  w.State.settings = { gen, metadata: {}, comfy: {} };
+  w.State.library = [];
+  const P = w.Pipeline;
+  const qc = (score, verdict, defects, fingerCounts = '') => ({ score, verdict, defects, fingerCounts, regions: [], notes: '', fix: '', scene: '' });
+  const fused = [{ what: 'fingers fused into a smooth shape', where: 'right hand', severity: 'noticeable' }];
+  test('a veto on an inspector FAIL at 5 gets a second look; a 4 or a severe defect does not', () => {
+    assert.equal(P.vetoNeedsConfirmation(qc(5, 'FAIL', fused)), true);
+    assert.equal(P.vetoNeedsConfirmation(qc(8, 'PASS', fused)), true);
+    assert.equal(P.vetoNeedsConfirmation(qc(4, 'FAIL', fused)), false);
+    assert.equal(P.vetoNeedsConfirmation(qc(6, 'FAIL', [{ what: 'fingers fused', severity: 'severe' }])), false);
+    assert.equal(P.vetoNeedsConfirmation(qc(5, 'FAIL', [{ what: 'background slightly soft' }])), false);
+  });
+  const clean = { gates: { hands: 'YES', limbs: 'YES', no_merges: 'YES', face: 'YES', detail: 'YES' }, overall: 8, worst: 'nothing' };
+  const broken = { gates: { hands: 'NO', limbs: 'YES', no_merges: 'YES', face: 'YES', detail: 'YES' }, overall: 5, worst: 'fused hand' };
+  test('a second look that finds the hands clean marks the card disputed (Review, not the bin)', () => {
+    const card = {};
+    const pass = P.applyQcResult(card, qc(5, 'FAIL', fused), { gateRole: 'confirm-veto', gates: clean });
+    assert.equal(pass, false);
+    assert.equal(card.qc.disputed, true);
+    assert.equal(card.qc.veto.checked, 'disputed');
+    assert.equal(card.qc.verdict, 'FAIL');
+  });
+  test('a second look that agrees keeps the veto, and the card is not disputed', () => {
+    const card = {};
+    P.applyQcResult(card, qc(5, 'FAIL', fused), { gateRole: 'confirm-veto', gates: broken });
+    assert.equal(card.qc.disputed, undefined);
+    assert.equal(card.qc.score, 4);
+    assert.equal(card.qc.veto.checked, 'confirmed');
+  });
+}
+
+console.log('comfyfind.js');
+{
+  const { createRequire } = await import('node:module');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const req = createRequire(import.meta.url);
+  const F = req('../src/main/comfyfind.js');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'acre-comfyfind-'));
+  try {
+    const appData = path.join(tmp, 'Roaming');
+    const home = path.join(tmp, 'home');
+    const inst = path.join(tmp, 'Installs', 'ComfyUI_me');
+    const wf = path.join(inst, 'ComfyUI', 'user', 'default', 'workflows');
+    fs.mkdirSync(wf, { recursive: true });
+    fs.writeFileSync(path.join(wf, 'AcreArtStudio_Qwen-Image-2.1_Q8.json'), '{}');
+    fs.mkdirSync(path.join(appData, 'Comfy Desktop', 'comfy-procs'), { recursive: true });
+    fs.writeFileSync(path.join(appData, 'Comfy Desktop', 'installations.json'), JSON.stringify([
+      { id: 'i1', name: 'ComfyUI_me', installPath: inst, sourceId: 'standalone', lastLaunchedAt: 5 },
+      { id: 'i2', name: 'Comfy Cloud', sourceId: 'cloud', remoteUrl: 'https://cloud.comfy.org/' }]));
+    fs.writeFileSync(path.join(appData, 'Comfy Desktop', 'comfy-procs', 'i1.json'), JSON.stringify({ port: 8189 }));
+    const portable = path.join(home, 'ComfyUI_windows_portable', 'ComfyUI');
+    fs.mkdirSync(path.join(portable, 'comfy'), { recursive: true });
+    fs.writeFileSync(path.join(portable, 'main.py'), '');
+    test('Comfy Desktop installs are found with their own port; a workflow-holding folder ranks first', () => {
+      const r = F.findComfyInstalls({ appData, home, drives: [] });
+      assert.equal(r[0].workflowsDir, wf);
+      assert.equal(r[0].workflows, 1);
+      assert.equal(JSON.stringify(r[0].serverUrls), '["http://127.0.0.1:8189"]');
+      assert.ok(r.some((x) => x.root === portable && !x.exists), 'portable root without a user folder is still offered');
+      assert.ok(!r.some((x) => /cloud/i.test(x.label)));
+    });
+    test("the studio's bundled workflow is preselected, anyone else's is not", () => {
+      assert.equal(F.pickBundled(['x.json', 'AcreArtStudio_Qwen-Image-2.1_Q4.json'], 'image'), 'AcreArtStudio_Qwen-Image-2.1_Q4.json');
+      assert.equal(F.pickBundled(['x.json'], 'image'), null);
+      assert.equal(F.pickBundled(['AcreArtStudio_FastH3_Video.json'], 'video'), 'AcreArtStudio_FastH3_Video.json');
+    });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

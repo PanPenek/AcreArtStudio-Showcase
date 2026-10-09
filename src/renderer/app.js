@@ -1866,6 +1866,42 @@
     }));
   }
 
+  /**
+   * 👍 Good example: the artist says what is good about a picture, the vision model looks at
+   * the picture WITH those words and proposes what to repeat; accepted, it becomes a
+   * hand-written playbook entry (survives every rebuild) with the picture kept beside it.
+   */
+  async function markGoodExample(card, btn) {
+    if (!window.Teach || !card || !card.fname) return;
+    const note = await askText('What makes this picture good?', '', {
+      multiline: true,
+      label: 'In your own words (optional) — the vision model reads this together with the picture',
+      placeholder: 'e.g. the soft window light and the way she looks past the camera; the warm, muted palette',
+    });
+    if (note === null) return;
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Looking…'; }
+    try {
+      const base64 = await window.ala.files.readImageBase64(card.fname);
+      const p = await Teach.readExample({ base64, mime: card.mime || 'image/png', note, prompt: card.prompt });
+      const preview = [
+        p.summary,
+        '',
+        ...p.lessons.map((l) => `· ${l.text}`),
+        ...(p.traits.length ? ['', `Repeat: ${p.traits.join(', ')}`] : []),
+      ].join('\n');
+      if (!confirm(`Add this picture to your playbook as a good example?\n\n${preview}`)) return;
+      Teach.addExample({ cardId: card.id, fname: card.fname, ...p });
+      renderTeach();
+      renderReview();
+      toast(`Added — ${p.lessons.length} lesson${p.lessons.length === 1 ? '' : 's'} from this picture go into the next prompts (Statistics → Teach it).`, 'ok');
+    } catch (e) {
+      toast('Could not read the picture: ' + e.message, 'err');
+    } finally {
+      if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = label; }
+    }
+  }
+
   /** The hand-written playbook editor. */
   function renderTeach() {
     const root = $('#teach-lessons');
@@ -1883,7 +1919,7 @@
         <div class="t-body">
           <div class="t-text">
             <span class="t-badge ${l.weight === 'always' ? 'always' : 'mine'}">${l.weight === 'always' ? 'always' : 'yours'}</span>
-            ${l.adopted ? '<span class="t-badge">adopted</span>' : ''}${esc(l.text)}</div>
+            ${l.adopted ? '<span class="t-badge">adopted</span>' : ''}${l.exampleId ? '<span class="t-badge" title="Written from a picture you marked good">from a picture</span>' : ''}${esc(l.text)}</div>
           ${l.why ? `<div class="t-why">${esc(l.why)}</div>` : ''}
         </div>
         <div class="t-acts">
@@ -1910,6 +1946,27 @@
       }
       renderTeach();
     }));
+
+    const exRoot = $('#teach-examples');
+    if (exRoot) {
+      const xs = (m.examples || []).slice().reverse();
+      exRoot.innerHTML = xs.length ? xs.map((x) => `
+        <div class="t-row t-ex" data-id="${esc(x.id)}">
+          ${x.fname ? `<img src="ala://img/${esc(x.fname)}" alt="" loading="lazy" />` : ''}
+          <div class="t-body">
+            <div class="t-text">${esc(x.summary || 'A picture you marked good')}</div>
+            ${x.note ? `<div class="t-why">You said: “${esc(x.note)}”</div>` : ''}
+            ${(x.traits || []).length ? `<div class="t-why">Repeat: ${esc(x.traits.join(', '))}</div>` : ''}
+          </div>
+          <div class="t-acts"><button data-xact="del" title="Forget this example and the lessons it produced">×</button></div>
+        </div>`).join('')
+        : '<div class="hint">None yet — press <b>👍 Good example</b> on a card in Review.</div>';
+      exRoot.querySelectorAll('[data-xact="del"]').forEach((b) => b.addEventListener('click', () => {
+        Teach.removeExample(b.closest('.t-ex').dataset.id);
+        renderTeach();
+        toast('Forgotten, with the lessons it produced.', 'ok');
+      }));
+    }
 
     const fill = (sel, val) => {
       const el = $(sel);
@@ -2730,6 +2787,7 @@
           ${c.fixOf ? `<span class="src-badge" title="${esc(`A repair of card ${c.fixOf}${c.autoFix ? ' (automatic, after it failed QC)' : ''}: ${c.editLabel || ''}`)}">🩹 fix${c.fixDelta && c.fixDelta.from != null && c.fixDelta.to != null ? ` ${c.fixDelta.from}→${c.fixDelta.to}` : ''}</span>`
             : c.editPrompt ? `<span class="src-badge" title="${esc(`An edit of ${c.editRoot || 'a picture'}: ${c.editLabel || ''}`)}">✎ edit</span>` : ''}
           ${c.fixedBy ? `<span class="src-badge none" title="A repaired copy of this picture exists (card ${esc(c.fixedBy)})">fixed copy made</span>` : ''}
+          ${window.Teach && Teach.manual().examples.some((x) => x.cardId === c.id) ? `<span class="src-badge keeper" title="You marked this picture as a good example — its lessons are in Statistics → Teach it">👍 good example</span>` : ''}
           ${qc ? `<span class="qc-score ${qc.verdict === 'PASS' ? 'good' : 'bad'}">${qc.score}/10</span>
           <span class="qc-defects" title="${esc((qc.defects || []).join('\n'))}${qcCaps.length ? esc('\n\n' + qcCaps.map((k) => `lowered by ${k.by}: ${k.why}`).join('\n')) : ''}${qc.gates && qc.gates.no ? esc(`\n\ngeneral pass: ${qc.gates.no}/${qc.gates.answered} gates NO (${qc.gates.failed.join(', ')})`) : ''}${qc.metrics ? esc(`\n\ndetail ${qc.metrics.detail} · sharp ${qc.metrics.sharp} · flat ${qc.metrics.flat}${qc.metrics.detailPercentile != null ? ` · ${qc.metrics.detailPercentile}th percentile of your library` : ''}`) : ''}${qc.engine ? esc(`\n\ninspected by ${qc.engine}${qc.model ? ' · ' + qc.model : ''}${qc.latencyMs ? ' · ' + Math.round(qc.latencyMs / 1000) + 's' : ''}${qc.passes > 1 ? ' · ' + qc.passes + ' passes' : ''}${qc.promptTokens || qc.completionTokens ? `\n${qc.promptTokens} tokens in (prompt + image), ${qc.completionTokens} out` : ''}`) : ''}">${qc.defects && qc.defects.length ? esc(qc.defects[0]) : esc(qc.notes || '')}</span>` : ''}
           ${!qc && c.qcSkipped ? `<span class="src-badge none" title="AI quality check was off when this was generated — your call">not inspected</span>` : ''}
@@ -2807,6 +2865,7 @@
           ${c.status === 'drafted' && !c.patreon ? `<a href="#" data-open="${esc(c.da && c.da.stashUrl || '')}">Open in Sta.sh ↗</a>` : ''}
           ${c.status === 'drafted' && c.patreon ? `<span class="hint">posted on Patreon ${esc(fmtTime(c.patreon.at))}</span>` : ''}
           <button class="btn ghost small" data-act="copyprompt" title="Copy this image's generation prompt to the clipboard">⧉ prompt</button>
+          ${c.fname ? `<button class="btn ghost small" data-act="goodexample" title="Tell the playbook this is a good picture: say what is good about it, the vision model looks at it with your words, and the lessons go into the next prompts">👍 Good example</button>` : ''}
           <button class="btn ghost small" data-act="copyimage" title="Copy the picture itself — paste it anywhere with Ctrl+V">⧉ image</button>
           <button class="btn ghost" data-act="delete" title="Delete card AND its image file">🗑</button>
         </div>
@@ -3009,6 +3068,8 @@
           State.persistLibrary();
           window.ala.files.deleteImage(prev).catch(() => {});
           toast('Original image restored.', 'ok');
+        } else if (act === 'goodexample') {
+          await markGoodExample(card, btn);
         } else if (act === 'copyprompt') {
           await window.ala.clip.text(card.prompt).catch(() => {});
           toast('Prompt copied.', 'ok');
@@ -5081,10 +5142,12 @@
       <div class="fld-row">
         <label class="fld"><span>Workflows folder</span><input data-set="comfy.workflowsDir" value="${esc(s.comfy?.workflowsDir || '')}" placeholder="(folder of ComfyUI workflow .json files)" /></label>
         <button class="btn" id="btn-comfy-pickdir">Choose folder…</button>
+        <button class="btn" id="btn-comfy-find" title="Look for a ComfyUI already installed on this PC (Comfy Desktop, the ComfyUI desktop app, a portable or manual install) and a server that answers">Find ComfyUI</button>
       </div>
+      <div class="hint" id="comfy-find-status" style="margin:-4px 0 12px">${s.comfy?.detectedFrom ? `Found automatically: ${esc(s.comfy.detectedFrom)}.` : ''}</div>
       <div class="fld-row">
-        <label class="fld slim"><span>Image workflow <em>(text-to-image)</em></span><select data-set="comfy.imageWorkflow" id="sel-comfy-imgwf"></select></label>
-        <label class="fld slim"><span>Video workflow <em>(image-to-video)</em></span><select data-set="comfy.videoWorkflow" id="sel-comfy-vidwf"></select></label>
+        <label class="fld"><span>Image workflow <em>(text-to-image)</em></span><select data-set="comfy.imageWorkflow" id="sel-comfy-imgwf"></select></label>
+        <label class="fld"><span>Video workflow <em>(image-to-video)</em></span><select data-set="comfy.videoWorkflow" id="sel-comfy-vidwf"></select></label>
       </div>
       <div class="note">Any ComfyUI workflow works — the app traces the prompt slot(s) back from the sampler, randomizes its seed, and collects whatever the save nodes report. Swap a file in for a different one and generation keeps working unchanged; both API-format and editor-format .json are accepted.</div>
       <div class="fld-row">
@@ -5103,7 +5166,8 @@
       <p class="panel-sub">What happens between "the image exists" and "it reaches Review".</p>
       <div class="fld-row">
         <label class="fld slim"><span>QC pass ≥</span><input type="number" min="1" max="10" data-set="gen.passThreshold" value="${s.gen.passThreshold}" /></label>
-        <label class="fld slim"><span>Retries</span><input type="number" min="0" max="6" data-set="gen.maxRetries" value="${s.gen.maxRetries}" /></label>
+        <label class="fld slim" title="How many times a job tries again after an ERROR (the generator or ComfyUI failed). A QC failure is not an error."><span>Retries <em>(errors)</em></span><input type="number" min="0" max="6" data-set="gen.maxRetries" value="${s.gen.maxRetries}" /></label>
+        <label class="fld slim" title="When EVERY picture of a prompt fails QC, render the prompt again from scratch this many times. Not Auto-fix (which repairs a failed picture). 0 = never: failed pictures stay under Review → Discarded."><span>Re-generate <em>(all failed QC)</em></span><input type="number" min="0" max="6" data-set="gen.qcRetries" value="${Number(s.gen.qcRetries) || 0}" /></label>
         <label class="fld slim"><span>Cooldown (s)</span><input type="number" min="0" max="300" data-set="gen.delayBetweenGensSec" value="${s.gen.delayBetweenGensSec}" /></label>
         <label class="fld slim"><span>Upload retries</span><input type="number" min="0" max="6" data-set="gen.maxUploadRetries" value="${s.gen.maxUploadRetries ?? 3}" /></label>
       </div>
@@ -5134,14 +5198,16 @@
         7/10 — so the description is read and the label is not. Off, an image the inspector itself called broken can
         pass again on the number alone.</div>
       <div class="checkbox-row"><input type="checkbox" id="set-qc-confirm-veto" ${s.gen.qcConfirmVeto !== false ? 'checked' : ''} />
-        <span><b>Check a veto with a second look</b> — before those words throw away a picture the inspector itself passed, one independent yes/no look at hands, limbs, merges and face</span></div>
+        <span><b>Check a veto with a second look</b> — before those words throw away a picture, one independent yes/no look at hands, limbs, merges and face</span></div>
       <div class="note">Measured 2026-09-23 on 1,613 inspected cards: the veto fired on <b>54%</b> of them, and how often
         depended on the model rather than the art — 80% of frames under deepseek-v4-flash-vision, 42% under another
         model on the same kind of pictures. If the second look agrees, the veto stands. If it finds every hand, limb and
-        face correct, the picture is <b>disputed</b>: capped at 6/10, marked on the card, and left to you — so your
-        <b>QC pass</b> bar decides. At a bar of 7 a 6 cannot pass, so the look is never spent and nothing changes; at
-        4–6 disputed pictures reach Review instead of the bin. If the look cannot run, the image waits under
-        “QC failed to run” for a retry — it is never discarded for that.</div>
+        face correct, the picture is <b>disputed</b>: capped at 6/10, marked on the card and sent to <b>Review</b> for you
+        to judge — never to the bin, never auto-fixed, never re-generated, never published on its own. That covers a
+        picture the inspector failed only because of those words too (it scored 5 for “fused fingers” on clean hands),
+        but not one it already called broken (4 or lower, or a defect it labelled severe). If the look cannot run on a
+        picture the inspector passed, the image waits under “QC failed to run” for a retry; on one it failed, the
+        inspection stands.</div>
       <div class="checkbox-row"><input type="checkbox" id="set-qc-general" ${s.gen.qcGeneralPass !== false ? 'checked' : ''} />
         <span><b>Second opinion on everything that would pass</b> — one general look at the picture as a whole, asked as five yes/no questions instead of as a score</span></div>
       <div class="note">A 1-10 rubric with ten written anchors invites the middle of it: 30 of those passing cards scored a
@@ -6033,6 +6099,57 @@
     }
   }
 
+  /**
+   * "Find ComfyUI": point the panel at a ComfyUI that is already installed. Sets the workflows
+   * folder to that install's own sidebar folder, the server URL to one that answers, and the
+   * studio's bundled workflows if they are in the folder and nothing is picked yet.
+   */
+  async function findComfy() {
+    const out = $('#comfy-find-status');
+    if (out) { out.textContent = 'Looking for ComfyUI on this PC…'; out.className = 'hint'; }
+    try {
+      const s = State.settings;
+      const d = await window.ala.comfy.detect({ urls: [s.comfy?.serverUrl] });
+      const patch = {};
+      const said = [];
+      if (d.best) {
+        patch.workflowsDir = d.best.workflowsDir;
+        patch.detectedFrom = d.best.label;
+        said.push(`${d.best.label} — workflows folder ${d.best.workflowsDir} (${d.best.workflows} workflow file${d.best.workflows === 1 ? '' : 's'})`);
+        if (d.best.workflowsDir !== s.comfy?.workflowsDir) {
+          // A workflow picked from the old folder does not exist in the new one.
+          if (s.comfy?.imageWorkflow && d.imageWorkflow) patch.imageWorkflow = d.imageWorkflow;
+          if (s.comfy?.videoWorkflow && d.videoWorkflow) patch.videoWorkflow = d.videoWorkflow;
+        }
+        if (!s.comfy?.imageWorkflow && d.imageWorkflow) patch.imageWorkflow = d.imageWorkflow;
+        if (!s.comfy?.videoWorkflow && d.videoWorkflow) patch.videoWorkflow = d.videoWorkflow;
+      }
+      if (d.live && d.live.url) {
+        patch.serverUrl = d.live.url;
+        said.push(`server answering at ${d.live.url}${d.live.version ? ' (ComfyUI ' + d.live.version + ')' : ''}`);
+      } else if (d.best) {
+        said.push('no server answering right now — start ComfyUI, or set a launch command below');
+      }
+      if (!Object.keys(patch).length) {
+        if (out) { out.textContent = 'No ComfyUI found in the usual places. Pick its user\\default\\workflows folder with Choose folder…'; out.className = 'hint err'; }
+        return;
+      }
+      State.settings = await window.ala.settings.patch({ comfy: patch });
+      for (const [key, val] of Object.entries(patch)) {
+        const input = $(`#settings-root input[data-set="comfy.${key}"]`);
+        if (input) input.value = val;
+      }
+      await populateComfyWorkflows();
+      const others = (d.installs || []).filter((i) => !d.best || i.workflowsDir !== d.best.workflowsDir);
+      if (out) {
+        out.textContent = 'Found: ' + said.join('; ') + '.' + (others.length ? ` Also found: ${others.map((i) => i.workflowsDir).join(', ')}.` : '');
+        out.className = 'hint ok';
+      }
+    } catch (e) {
+      if (out) { out.textContent = 'Could not look: ' + e.message; out.className = 'hint err'; }
+    }
+  }
+
   /** Ask the server it is pointed at whether it answers, and what version. */
   async function testComfyServer() {
     const out = $('#comfy-status');
@@ -6177,6 +6294,7 @@
       if (a) { e.preventDefault(); window.ala.app.openExternal(a.dataset.ext); }
       if (e.target.closest('#btn-pch-catalog')) readPerchanceCatalog();
       if (e.target.closest('#btn-comfy-test')) testComfyServer();
+      if (e.target.closest('#btn-comfy-find')) findComfy();
       if (e.target.closest('#btn-comfy-pickdir')) {
         window.ala.comfy.pickDir().then(async (dir) => {
           if (!dir) return;

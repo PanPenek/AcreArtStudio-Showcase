@@ -8,6 +8,8 @@
  *   rules:   always / never constraints
  *   banned:  phrases a prompt must not contain; CHECKED in code, not just requested
  *   boost:   manual weights on themes and tags
+ *   examples: pictures the artist marked GOOD, each read by the vision model together with
+ *            the artist's own words about it (what to repeat, never the subject itself)
  * `propose` turns a paragraph of the artist's words into structured lessons, but
  * only returns them. Nothing is saved without the artist accepting it.
  */
@@ -25,6 +27,7 @@
     pinned: [],
     muted: [],
     notes: '',
+    examples: [],
     updatedAt: null,
   });
 
@@ -53,6 +56,7 @@
       if (!Array.isArray(m.pinned)) m.pinned = [];
       if (!Array.isArray(m.muted)) m.muted = [];
       if (typeof m.notes !== 'string') m.notes = '';
+      if (!Array.isArray(m.examples)) m.examples = [];
       return m;
     },
 
@@ -251,8 +255,9 @@
       const always = m.rules.always.filter(Boolean);
       const never = m.rules.never.filter(Boolean);
       const own = hard ? m.lessons.filter((l) => l.weight === 'always') : m.lessons;
+      const examples = hard ? [] : (m.examples || []).slice(-6);
 
-      if (own.length || always.length || never.length || m.banned.length || m.notes.trim()) {
+      if (own.length || always.length || never.length || m.banned.length || m.notes.trim() || examples.length) {
         lines.push("THE ARTIST'S OWN INSTRUCTIONS — these outrank everything measured below:");
       }
       for (const l of own.slice(0, 20)) {
@@ -264,6 +269,11 @@
         lines.push(`  · These words and phrases are BANNED and must not appear in any prompt: ${m.banned.join(', ')}`);
       }
       if (m.notes.trim()) lines.push(`  · Context from the artist: ${m.notes.trim().slice(0, 500)}`);
+      for (const x of examples) {
+        const bits = [x.summary, x.note ? `the artist said: "${x.note.slice(0, 240)}"` : '', x.traits.length ? `repeat: ${x.traits.join(', ')}` : '']
+          .filter(Boolean).join(' — ');
+        if (bits) lines.push(`  · A picture the artist marked GOOD: ${bits}`);
+      }
       return lines.join('\n');
     },
 
@@ -271,13 +281,95 @@
     isEmpty() {
       const m = this.manual();
       return !m.lessons.length && !m.rules.always.length && !m.rules.never.length
-        && !m.banned.length && !m.notes.trim()
+        && !m.banned.length && !m.notes.trim() && !m.examples.length
         && !Object.keys(m.boost.themes).length && !Object.keys(m.boost.tags).length;
     },
 
     count() {
       const m = this.manual();
       return m.lessons.length + m.rules.always.length + m.rules.never.length + m.banned.length;
+    },
+
+    // ---------- good examples: a picture + the artist's words, read by vision ----------
+
+    /**
+     * Show the vision model a picture the artist marked GOOD, together with what THEY say is
+     * good about it, and get back what to repeat. Returns a proposal only; nothing is saved
+     * until `addExample` (the artist sees it first).
+     */
+    async readExample({ base64, mime = 'image/png', note = '', prompt = '' } = {}) {
+      if (!base64) throw new Error('no picture to look at');
+      const said = String(note || '').trim().slice(0, 1200);
+      const ask = `An artist marked this picture as a GOOD example: more of their AI art should be like it.
+${said ? `What THEY say makes it good — this comes first, build everything around it:\n"""${said}"""\n` : 'They did not say why, so work it out from the picture itself.\n'}${prompt ? `It was generated from this prompt (context only — judge the picture, not the prompt):\n"""${String(prompt).slice(0, 1200)}"""\n` : ''}
+Look at the picture. Name the qualities that make it work — composition, framing and camera, pose and expression, lighting, palette, mood, background, rendering style — and turn them into instructions a prompt writer can follow for NEW pictures.
+- Their words decide what matters; use what you see to make each point concrete ("warm rim light from a window behind her", not "nice lighting").
+- Describe what to REPEAT, not this exact scene: no character names, no identity details, nothing that only fits this one picture.
+- Never mention flaws, hands, anatomy or render defects; this is about what is good.
+- 1 to 3 lessons. Do not pad.
+
+Respond ONLY with JSON:
+{"summary": "one sentence: what is good about it", "traits": ["short visual trait", "..."], "lessons": [{"text": "instruction for future prompts", "why": "what in the picture shows it"}]}`;
+      const r = await U.llmVision(base64, mime, ask, { role: 'vision', temperature: 0.3, maxTokens: 3000 }, 'Reading your good example');
+      const j = U.extractJson(r.text) || {};
+      const lessons = (Array.isArray(j.lessons) ? j.lessons : [])
+        .map((l) => ({ text: String((l && l.text) || '').trim(), why: String((l && l.why) || '').trim() }))
+        .filter((l) => l.text)
+        .slice(0, 3);
+      if (!lessons.length) throw new Error('the vision model did not say anything concrete about it');
+      return {
+        summary: String(j.summary || '').trim().slice(0, 300),
+        traits: (Array.isArray(j.traits) ? j.traits : []).map((t) => String(t || '').trim()).filter(Boolean).slice(0, 8),
+        lessons,
+        note: said,
+        engine: r.provider || r.engine || '',
+        model: r.model || '',
+      };
+    },
+
+    /** Save an accepted example: the picture reference, the artist's words and its lessons. */
+    addExample({ cardId = null, fname = '', note = '', summary = '', traits = [], lessons = [], engine = '', model = '' } = {}) {
+      const m = this.manual();
+      const id = (window.U && U.uid) ? U.uid() : `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+      const ex = {
+        id, cardId, fname: String(fname || ''),
+        note: String(note || '').slice(0, 1200),
+        summary: String(summary || '').slice(0, 300),
+        traits: (traits || []).map(String).slice(0, 8),
+        engine: String(engine || ''), model: String(model || ''),
+        createdAt: Date.now(),
+      };
+      // Drop an older example of the same picture: marking it again replaces the reading.
+      if (cardId) {
+        const old = m.examples.filter((x) => x.cardId === cardId).map((x) => x.id);
+        if (old.length) {
+          m.examples = m.examples.filter((x) => !old.includes(x.id));
+          m.lessons = m.lessons.filter((l) => !old.includes(l.exampleId));
+        }
+      }
+      m.examples = [...m.examples, ex].slice(-24);
+      const now = Date.now();
+      m.lessons = [...m.lessons, ...(lessons || []).filter((l) => l && l.text).map((l, i) => ({
+        id: `${id}-${i}`,
+        text: String(l.text).trim().slice(0, 600),
+        why: `From a picture you marked good${ex.summary ? ` (${ex.summary})` : ''}${l.why ? ` — ${l.why}` : ''}`.slice(0, 400),
+        weight: 'prefer',
+        exampleId: id,
+        createdAt: now,
+        updatedAt: now,
+      }))];
+      this._save();
+      return ex;
+    },
+
+    /** Forget an example and the lessons it produced. */
+    removeExample(id) {
+      const m = this.manual();
+      const before = m.examples.length;
+      m.examples = m.examples.filter((x) => x.id !== id);
+      m.lessons = m.lessons.filter((l) => l.exampleId !== id);
+      if (m.examples.length !== before) this._save();
+      return m.examples;
     },
 
     /** Turn a paragraph of the artist's own words into structured lessons and rules. */

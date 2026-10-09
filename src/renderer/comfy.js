@@ -663,6 +663,10 @@
     async ensureServer({ timeoutMs = 180000, log = () => {} } = {}) {
       const st = await this.status();
       if (st.up) return st;
+      // A ComfyUI that is already running elsewhere (Comfy Desktop picks its own port, the
+      // older desktop app serves on 8000) beats launching a second one.
+      const moved = await this.findRunningServer(log);
+      if (moved) return moved;
       const cmd = String(this.cfg.launchCommand || '').trim();
       if (!cmd) throw engineDown(`ComfyUI is not answering at ${this.cfg.serverUrl} and no launch command is set (Settings → Generator)`);
       log(`ComfyUI not answering at ${this.cfg.serverUrl} — starting it: ${cmd}`);
@@ -675,6 +679,31 @@
         if (s2.up) { log(`ComfyUI is up (${s2.name}).`); return s2; }
       }
       throw engineDown(`ComfyUI did not come up within ${Math.round(timeoutMs / 1000)}s`);
+    }
+
+    /**
+     * The configured URL does not answer: ask main for a ComfyUI that does (each detected
+     * install's own port, then 8188 / 8000). Found one → save it as the server URL and use it.
+     */
+    async findRunningServer(log = () => {}) {
+      if (!window.ala || !window.ala.comfy || !window.ala.comfy.detect) return null;
+      try {
+        const cur = String(this.cfg.serverUrl || '').replace(/\/+$/, '');
+        const d = await window.ala.comfy.detect({ urls: [] });
+        if (!d || !d.live || !d.live.url || d.live.url === cur) return null;
+        log(`ComfyUI is not answering at ${cur}, but one is running at ${d.live.url}, so the app uses that one now (saved in Settings → Generation).`);
+        if (typeof State !== 'undefined' && window.ala.settings) {
+          State.settings = await window.ala.settings.patch({ comfy: { serverUrl: d.live.url } });
+          const input = document.querySelector('#settings-root input[data-set="comfy.serverUrl"]');
+          if (input) input.value = d.live.url;
+        } else {
+          this.settings.comfy = Object.assign({}, this.settings.comfy, { serverUrl: d.live.url });
+        }
+        const st = await this.status();
+        return st.up ? st : null;
+      } catch {
+        return null;
+      }
     }
 
     /** Upload bytes into the server's input/ folder. */

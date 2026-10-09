@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const { Readable } = require('stream');
 const { spawn } = require('child_process');
 const { Store, migrateDestinationToList } = require('./store');
+const comfyFind = require('./comfyfind');
 const llm = require('./llm');
 const { DAClient } = require('./da');
 const { DAWebClient } = require('./daweb');
@@ -84,6 +85,7 @@ app.whenReady().then(() => {
     patreonMedia = createPatreonMedia({ store, getWindow: () => win,
       patreonSession: session.fromPartition('persist:patreon'), nativeImage, clipboard, shell });
     registerIpc();
+    autoFillComfy();
     installDaOAuthInterceptor();
     installUpscalerDownloadHandler();
     installWebviewOpenHandler();
@@ -97,6 +99,40 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => { try { if (store) store.flushAll(); } catch (e) { console.error('[ala] flush on quit failed:', e); } });
 app.on('will-quit', () => { try { if (store) store.flushAll(); } catch { } });
+
+/**
+ * First start (or a cleared field): point the ComfyUI settings at a ComfyUI that is already
+ * installed instead of leaving the artist to find its workflows folder by hand. Only fills
+ * EMPTY fields, so a folder or workflow the artist picked is never overwritten. Disk reads
+ * only; the server URL is found live by the driver when the configured one does not answer.
+ */
+function autoFillComfy() {
+  try {
+    const c = store.settings.data.comfy = store.settings.data.comfy || {};
+    let changed = false;
+    if (!String(c.workflowsDir || '').trim()) {
+      const hit = comfyFind.findComfyInstalls({ appRoot: path.join(__dirname, '..', '..') }).find((x) => x.exists);
+      if (hit) {
+        c.workflowsDir = hit.workflowsDir;
+        c.detectedFrom = hit.label;
+        changed = true;
+        console.log(`[comfy] found ${hit.label}: workflows folder ${hit.workflowsDir}`);
+      }
+    }
+    const dir = String(c.workflowsDir || '').trim();
+    if (dir && (!c.imageWorkflow || !c.videoWorkflow)) {
+      let files = [];
+      try { files = fs.readdirSync(dir); } catch { }
+      const img = !c.imageWorkflow && comfyFind.pickBundled(files, 'image');
+      const vid = !c.videoWorkflow && comfyFind.pickBundled(files, 'video');
+      if (img) { c.imageWorkflow = img; changed = true; }
+      if (vid) { c.videoWorkflow = vid; changed = true; }
+    }
+    if (changed) store.settings.save();
+  } catch (e) {
+    console.error('[comfy] auto-detect failed:', e.message);
+  }
+}
 
 function createWindow() {
   const startHidden = START_HIDDEN || !!(store.settings.data.ui && store.settings.data.ui.startHidden);
@@ -567,6 +603,27 @@ function registerIpc() {
     const full = path.join(d, f);
     if (full !== d && !full.startsWith(d + path.sep)) throw new Error('path escapes the workflows directory');
     return JSON.parse(fs.readFileSync(full, 'utf8'));
+  });
+
+  /**
+   * Find ComfyUI installs on this machine and a server that answers. `urls` are tried first
+   * (the configured one), then each install's own port, then the usual 8188 / 8000.
+   */
+  h('comfy:detect', async (_e, { urls = [] } = {}) => {
+    const installs = comfyFind.findComfyInstalls({ appRoot: path.join(__dirname, '..', '..') });
+    const tryUrls = [...(Array.isArray(urls) ? urls : []), ...installs.flatMap((i) => i.serverUrls),
+      'http://127.0.0.1:8188', 'http://127.0.0.1:8000'];
+    const live = await comfyFind.firstLiveServer(tryUrls);
+    let files = [];
+    const best = installs.find((i) => i.exists) || null;
+    if (best) { try { files = fs.readdirSync(best.workflowsDir); } catch { } }
+    return {
+      installs: installs.filter((i) => i.exists).slice(0, 8),
+      best,
+      live,
+      imageWorkflow: comfyFind.pickBundled(files, 'image'),
+      videoWorkflow: comfyFind.pickBundled(files, 'video'),
+    };
   });
 
   /** Pick a folder of ComfyUI workflow files. */

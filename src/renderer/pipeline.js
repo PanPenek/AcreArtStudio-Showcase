@@ -1349,9 +1349,11 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           this.inspectSaved(job, it, { skipInspection: this._parkInsteadOfInspect() }));
         const passed = cards.filter((c) => c && c.status === 'metadata');
         const stalled = cards.filter((c) => c && c.status === 'qc_error').length;
+        const disputedN = passed.filter((c) => c.qc && c.qc.disputed).length;
         log(manual
           ? `${passed.length} image(s) saved in ${Math.round((Date.now() - qcStart) / 1000)}s — none inspected, all go to Review.`
-          : `QC done in ${Math.round((Date.now() - qcStart) / 1000)}s — ${passed.length} passed`
+          : `QC done in ${Math.round((Date.now() - qcStart) / 1000)}s — ${passed.length - disputedN} passed`
+            + (disputedN ? `, ${disputedN} disputed (sent to Review for you to judge)` : '')
             + `, ${cards.filter((c) => c && c.status === 'discarded').length} failed`
             + (stalled ? `, ${stalled} could not be inspected (kept for retry)` : ''));
 
@@ -1401,15 +1403,19 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           const lastFail = cards.filter((c) => c && c.status === 'discarded' && c.qc).pop();
           if (lastFail && window.ImageEdit) await ImageEdit.maybeAutoFix(lastFail).catch(() => null);
         } else if (passCount === 0) {
+          // Re-rendering a prompt whose every picture failed QC is its own switch
+          // (gen.qcRetries, default 0), apart from Retries (errors) and from Auto-fix.
           job.attempts += 1;
-          const max = State.settings.gen.maxRetries || 0;
+          const max = Math.max(0, Number(State.settings.gen.qcRetries) || 0);
           if (job.attempts <= max) {
             job.status = 'queued';
-            log(`All images failed QC — retrying (${job.attempts}/${max}).`, 'err');
+            log(`All images failed QC — re-generating the prompt (${job.attempts}/${max}; Settings → Quality check → Re-generate).`, 'err');
           } else {
             job.status = 'failed';
-            job.error = 'all images failed QC after retries';
-            log('Job failed: all images failed QC after retries.', 'err');
+            job.error = max ? 'all images failed QC after re-generating' : 'all images failed QC';
+            log(max
+              ? 'Job failed: all images failed QC after re-generating.'
+              : `All ${total} image(s) failed QC — nothing is re-generated (Re-generate is 0); they are kept under Review → Discarded.`, 'err');
           }
         } else {
           job.status = 'done';
@@ -1460,12 +1466,20 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
       const worth = State.settings.gen.qcGeneralPass !== false
         && this.applyQcResult({}, qc, meta);
       const confirm = !worth && this.vetoNeedsConfirmation(qc);
+      // For a frame the inspector itself FAILED, the second look is a chance to rescue it
+      // from the bin, not a requirement: if it cannot run, the inspection stands as before.
+      const optional = confirm && qc.verdict.trim().toUpperCase() !== 'PASS';
       meta.generalRequired = worth;
-      meta.confirmRequired = confirm;
+      meta.confirmRequired = confirm && !optional;
       if (worth || confirm) {
         meta.gateRole = worth ? 'second-opinion' : 'confirm-veto';
         try {
-          const g = await U.llmVision(small.base64, small.mime, T.qcGates(), {},
+          // The veto check asks ANOTHER vision model when one is configured; on a frame the
+          // inspector failed it must (the same model just repeats its own claim).
+          const gateOpts = confirm && r.providerId
+            ? { avoid: { id: r.providerId, model: r.model || '' }, avoidStrict: optional }
+            : {};
+          const g = await U.llmVision(small.base64, small.mime, T.qcGates(), gateOpts,
             worth ? 'Vision QC (general)' : 'Vision QC (checking a veto)');
           meta.gateEngine = g.engine;
           meta.gateModel = g.model;
@@ -1477,6 +1491,12 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           meta.latencyMs += g.latencyMs || 0;
           meta.passes = 2;
         } catch (e) {
+          if (optional) {
+            log(`Second look at a vetoed image could not run (${e.message}) — the inspection's verdict stands.`);
+            delete meta.gates;
+            meta.gateRole = null;
+            return { qc, meta };
+          }
           log(worth
             ? `General QC pass could not run — image kept for retry (${e.message}).`
             : `Second look at a vetoed image could not run — image kept for retry (${e.message}).`, 'err');
@@ -1622,13 +1642,19 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
       return { words, fingers: fr.bad.map((h) => h.said), hands: fr.hands };
     },
 
-    /** Would a second look be worth spending on this vetoed frame? */
+    /**
+     * Would a second look be worth spending on this vetoed frame? Yes whenever the veto is
+     * what would throw it away: a disputed frame goes to Review for the artist instead of the
+     * bin, whatever the pass bar. That includes an inspector FAIL whose low number comes from
+     * the vetoed anatomy itself (deepseek-v4-flash writes "fused fingers" on clean hands on
+     * most frames, measured 80%), but not one it already scored as broken (severe band) or
+     * labelled severe.
+     */
     vetoNeedsConfirmation(qc) {
       const gen = State.settings.gen || {};
       if (gen.qcConfirmVeto === false || gen.qcVeto === false) return false;
-      if (!qc || typeof qc.verdict !== 'string' || qc.verdict.trim().toUpperCase() !== 'PASS') return false;
-      const threshold = gen.passThreshold || 7;
-      if (Math.min(Number(qc.score), DISPUTED_CAP) < threshold) return false;
+      if (!qc || typeof qc.verdict !== 'string' || !/^(PASS|FAIL)$/i.test(qc.verdict.trim())) return false;
+      if (!(Number(qc.score) > SEVERE_BAND)) return false;
       const defects = (Array.isArray(qc.defects) ? qc.defects : []).map((d) => (d && typeof d === 'object')
         ? { what: String(d.what || d.defect || ''), where: String(d.where || ''), severity: String(d.severity || '').trim().toLowerCase() }
         : { what: String(d), where: '', severity: '' });
@@ -1724,6 +1750,12 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           card.updatedAt = Date.now();
           State.persistLibrary();
           log(`QC could not run — image kept for retry (${e.message})`, 'err');
+          return card;
+        }
+        if (!pass && card.qc && card.qc.disputed) {
+          card.status = 'metadata';
+          card.updatedAt = Date.now();
+          State.persistLibrary();
           return card;
         }
         if (!pass) {
@@ -1903,6 +1935,10 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           words: veto.words, fingers: veto.fingers,
           ...(checkedVeto ? { checked: disputed ? 'disputed' : 'confirmed' } : {}),
         },
+        // Disputed and not passed: the two looks disagree about the anatomy, so the picture
+        // goes to Review for the artist rather than the bin (never auto-fixed, never retried,
+        // never published on its own — the verdict stays FAIL).
+        ...(disputed && !pass ? { disputed: true } : {}),
         defects: defects.map((d) => d.where ? `${d.what} (${d.where})` : d.what).filter(Boolean),
         detail: defects,
         regions: (Array.isArray(qc.regions) ? qc.regions : []).map((r) =>
@@ -1971,6 +2007,8 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         }
         card.status = 'review';
         if (fromQcError) State.bumpStats({ imagesPassed: 1 });
+      } else if (fromQcError && card.qc && card.qc.disputed) {
+        card.status = 'review';
       } else if (fromQcError) {
         card.status = 'discarded';
         State.bumpStats({ imagesFailed: 1 });

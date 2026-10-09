@@ -491,7 +491,7 @@
       m.className = 'ie-fixmenu';
       m.innerHTML = `
         ${Object.entries(ImageEdit.FIX_PRESETS).map(([k, p]) => `<button class="btn ghost small" data-fix="${k}" title="${esc(p.text)}">${esc(p.label)}</button>`).join('')}
-        <button class="btn ghost small" data-fix="auto" title="${esc(hasQc ? ImageEdit.fixInstruction('auto', card) : 'No QC findings yet — runs QC on this picture first, then fixes what it finds')}">Auto (from QC)</button>
+        <button class="btn ghost small" data-fix="auto" title="${esc(hasQc ? ImageEdit.fixInstruction('auto', card) : 'No QC findings yet — runs QC on this picture first, then fixes what it finds')}">From QC findings</button>
         <div class="ie-fixfree"><input type="text" placeholder="…or describe the fix" maxlength="600" /><button class="btn small" data-fix="free">Fix</button></div>`;
       document.body.appendChild(m);
       const r = anchor.getBoundingClientRect();

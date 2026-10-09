@@ -512,6 +512,21 @@ body {
 .fld > span em { color: var(--text-faint); font-style: normal; font-weight: 400; }
 .fld.slim { max-width: 110px; }
 .fld-row { display: flex; gap: 12px; align-items: flex-end; }
+/* Settings rows line up on the CONTROL, not on the field's margin box. With flex-end a
+   button sat 12 px below the inputs beside it (the field's bottom margin was counted, the
+   button has none), and every inline margin override moved it again. So inside a row the
+   spacing belongs to the row, fields carry no bottom margin, and a button is as tall as an
+   input: bottoms align, so centres align, whatever the label height. Plain fields share
+   the row's width instead of shrinking to their placeholder, and a slim select gets room
+   for its own option text. */
+#settings-root .fld-row { flex-wrap: wrap; margin-bottom: 12px; }
+#settings-root .fld-row > .fld { margin-bottom: 0 !important; }
+#settings-root .fld-row > .fld:not(.slim) { flex: 1 1 200px; min-width: 0; }
+#settings-root .fld-row > .btn { flex: none; min-height: 35px; }
+#settings-root .fld.slim:has(> select) { max-width: 160px; }
+/* Multi-line checkbox labels: the box sits on the first line, not halfway down. */
+#settings-root .checkbox-row { align-items: flex-start; }
+#settings-root .checkbox-row > input { flex: none; margin-top: 2px; }
 /* Opt-out, not opt-in. The old list was `[type=text],[type=number],[type=password]`,
    which silently missed every `<input>` written without a type attribute — 14 of them on
    the Settings page alone, each rendering as a raw white box with black text on a dark
@@ -1150,6 +1165,9 @@ details.fold > *:not(summary) { margin-top: 10px; }
 
 /* ---------- Providers & routing ---------- */
 .settings-body .set-sec:has(> .panel.wide) { max-width: 980px; }
+/* One width per section: a wide panel (providers, title variety) used to stick out past
+   its 720 px neighbours, so the section's right edge zig-zagged. */
+.settings-body .set-sec:has(> .panel.wide) > .panel { max-width: none; }
 .prov-list { display: flex; flex-direction: column; gap: 12px; }
 .prov-row {
   border: 1px solid var(--border); border-left: 3px solid var(--accent-dim);
@@ -1634,6 +1652,8 @@ details.fold > *:not(summary) { margin-top: 10px; }
 .t-badge { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
   padding: 0 5px; border-radius: 3px; border: 1px solid var(--border); color: var(--text-faint); margin-right: 6px; }
 .t-badge.always { color: var(--accent); border-color: var(--accent); }
+/* A picture the artist marked good, with what the vision model read from it. */
+.t-row.t-ex img { width: 64px; height: 64px; object-fit: cover; border-radius: var(--radius-sm); flex: none; border: 1px solid var(--border); }
 .t-badge.mine { color: var(--ok-soft); border-color: var(--ok-soft); }
 /* Derived lessons get the same affordances, so pin/mute sit where the eye already is. */
 .lesson { align-items: flex-start; }
