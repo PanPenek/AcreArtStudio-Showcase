@@ -230,13 +230,18 @@ matter if you want to publish.
 | **Dashboard** | Is everything working? One status row per job (writing, metadata, quality check, generation, upload), plus what's running right now |
 | **Overseer** | Chat with the assistant. It can research a subject, write and queue prompts, edit pictures, make videos and report back. Every action it takes is shown, so you can check what it did |
 | **Prompt Lab** | Write prompts from examples, reference images or a story. Manage the generation queue |
-| **Review** | The main grid: every picture with its score, defects, prompt and metadata. Keyboard-driven |
+| **Review** | The main grid: every picture with its score, defects, prompt and metadata. Keyboard-driven. Every card has **✎ Edit** and **🩹 Fix** |
+| **Image Edit** | Edit one picture with Qwen-Image 2.1: brush an area and say what should change there, or describe a change to the whole picture. Every result is a numbered checkpoint in a history panel (undo, redo with a new seed, reuse an instruction, branch from an older one). Results keep the source picture's size |
 | **Drafts** | What has been uploaded, what is waiting, what failed and why |
 | **Statistics** | How published work performs, the learned playbook, and your own *Teach it* rules |
 | **Comics** | Build comic pages and illustrated stories, with a live preview of the real page |
 | **Continuations** | Turn "please make a part 2!" into a prompt that keeps the character |
 | **Perchance / Upscaler / DeviantArt / Patreon** | Built-in browser tabs for those sites. You sign in once and the app reuses the session |
 | **Settings** | One section at a time, with a search box that finds any setting. 9 colour themes |
+
+**Sidebar order:** hold any tab for a second and drag it where you want it; the other tabs slide out of the way. Settings → Library & app → *Sidebar order* resets it.
+
+**Fixing broken pictures:** 🩹 Fix on a card repairs fingers, mushed detail, proportions, the face, or whatever QC found. When a vision model is available it first describes the *corrected* picture, which works much better than a list of defects. Local damage is repaired with an edit that keeps the look; a broken body gets a fresh render on new seeds with the same character, outfit and scene in a simpler pose. With *Auto-fix failed pictures* on (Settings → Generation), a picture that fails QC is repaired automatically, up to two tries. The Overseer can do the same on request ("fix the last batch").
 
 <table>
 <tr>

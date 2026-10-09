@@ -1018,9 +1018,20 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
       };
     },
 
-    async start() {
-      if (this.running) return;
+    /**
+     * `only` (job ids) runs JUST those jobs and stops — an image edit/fix queued while the
+     * worker is paused must not wake the whole paused queue. A plain start() while an `only`
+     * run is going widens it to the whole queue (the Dashboard Start button); another `only`
+     * start adds its ids to the running set.
+     */
+    async start({ only = null } = {}) {
+      if (this.running) {
+        if (!only) this._only = null;
+        else if (this._only) for (const id of only) this._only.add(id);
+        return;
+      }
       if (!this.driver) { log('Perchance driver not attached yet.', 'err'); return; }
+      this._only = only ? new Set(only) : null;
       this.running = true;
       this._stopRequested = false;
       this._abandonLane = false;
@@ -1031,9 +1042,15 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         if (t && State.worker.statusText !== t) State.setWorker({ statusText: t });
       }, 5000);
       let jobsDone = 0;
+      const nextJob = () => State.queue.find((j) => j.status === 'queued' && (!this._only || this._only.has(j.id)));
       try {
         while (!this._stopRequested) {
-          let job = State.queue.find((j) => j.status === 'queued');
+          let job = nextJob();
+          if (!job && this._only) {
+            const rest = State.queue.filter((j) => j.status === 'queued').length;
+            log(`Edit${this._only.size === 1 ? '' : 's'} done — worker stops here${rest ? `; the other ${rest} queued job(s) stay paused` : ''}.`, 'ok');
+            break;
+          }
           if (!job) {
             if (jobsDone > 0 && !this.laneImages()) {
               const waiting = State.library.filter((c) => c.status === 'review').length;
@@ -1052,7 +1069,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           }
           await this.awaitLaneRoom();
           if (this._stopRequested) break;
-          job = State.queue.find((j) => j.status === 'queued');
+          job = nextJob();
           if (!job) continue;
           State.setWorker({ currentJobId: job.id });
           this.setPhase('Generating images…');
@@ -1072,6 +1089,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         }
         if (this._lanePromise) await this._lanePromise.catch(() => {});
         this.running = false;
+        this._only = null;
         this._phase = null;
         this._lanePhase = null;
         clearInterval(tick);
@@ -1192,6 +1210,9 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           if (generationDriver === this._comfyDriver) {
             this.setPhase('Preparing searched references…');
             references = await this.researchReferences(job);
+          } else if (job.promptSource === 'edit') {
+            // "Edit <image1>…" without the picture would render a random new image.
+            throw new Error('an image edit needs the ComfyUI engine (Settings → Generation) — Perchance cannot take a picture as input');
           } else {
             job.referenceFetchErrors = job.referenceIds.map((id) => ({
               id: String(id), error: 'the active generation engine does not accept image references',
@@ -1202,7 +1223,9 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
 
         this.setPhase('Generating images…');
         const result = await generationDriver.generate(job.prompt,
-          { filters: job.controls, references, shouldStop: () => this._stopRequested, count: Number(job.count) > 0 ? Number(job.count) : 0 }, log);
+          { filters: job.controls, references, shouldStop: () => this._stopRequested, count: Number(job.count) > 0 ? Number(job.count) : 0,
+            // An edit (Image Edit tab, 🩹 Fix, Overseer edit_image) comes back at the source size.
+            matchSource: !!job.editOf }, log);
         const refResult = result.referenceResult || null;
         job.attachedReferenceIds = refResult ? [...(refResult.attached || [])] : [];
         job.referenceErrors = [
@@ -1307,7 +1330,9 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
       const total = items.length;
       const phase = (t) => (this.parallelPostOn() ? this.setLanePhase(t) : this.setPhase(t));
       try {
-        const manual = !!State.settings.gen.skipQc;
+        // forceQc: a repair the Overseer queued (fix_images) is always inspected — a "fix"
+        // nobody checked is not one — even while Manual QC is on.
+        const manual = !!State.settings.gen.skipQc && !job.forceQc;
         const route = manual ? null : await window.ala.llm.route('vision').catch(() => null);
         const lead = route && route.chain && route.chain[0];
         const limit = manual ? total : Math.max(1, (route && route.maxConcurrency) || 1);
@@ -1351,7 +1376,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           const mName = metaLead && metaLead.chain && metaLead.chain[0] && metaLead.chain[0].name;
           phase(`Writing titles & tags for ${described.length}${mName ? ` via ${mName}` : ''}…`);
           log(`${described.length}/${total} passed QC — writing metadata…`);
-          await this.applyBatchMetadata(job, described);
+          await this.applyBatchMetadata(job.basePrompt ? { ...job, prompt: job.basePrompt } : job, described);
         }
         const passCount = passed.length;
 
@@ -1366,6 +1391,15 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           log(`Job parked — none of ${total} image(s) were inspected `
             + `(${this._stopRequested ? 'worker stopped' : 'vision model unreachable'}). `
             + `They are kept, not discarded.`, 'err');
+        } else if (passCount === 0 && job.autoFix) {
+          // An auto-fix repair is never re-rendered by Retries: the auto-fix chain owns its
+          // tries (gen.autoFixTries). Only when EVERY picture of the repair failed does the
+          // next try go in (a re-render's 2 seeds: one passing is a fixed picture).
+          job.status = 'failed';
+          job.error = 'auto-fix repair failed QC';
+          log(`Auto-fix repair ${job.autoFixTry || 1}${job.fixMode === 'rerender' ? ' (re-render)' : ''} failed QC.`, 'err');
+          const lastFail = cards.filter((c) => c && c.status === 'discarded' && c.qc).pop();
+          if (lastFail && window.ImageEdit) await ImageEdit.maybeAutoFix(lastFail).catch(() => null);
         } else if (passCount === 0) {
           job.attempts += 1;
           const max = State.settings.gen.maxRetries || 0;
@@ -1612,7 +1646,18 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
     async saveCard(job, img) {
       const saved = await window.ala.files.saveImage(img.base64, U.extFromMime(img.mime), 'pch');
       const card = {
-        id: saved.id, jobId: job.id, theme: job.theme, prompt: job.prompt,
+        // An Image Edit / Fix card keeps its source's prompt as `prompt` — titles, metadata
+        // and QC all read it — and the instruction Qwen got as `editPrompt`. A fix
+        // instruction quotes the QC critique, which must never reach the title writer.
+        id: saved.id, jobId: job.id, theme: job.theme, prompt: job.basePrompt || job.prompt,
+        editPrompt: job.promptSource === 'edit' ? job.prompt : null,
+        editLabel: job.editLabel || null,
+        editRoot: job.editRoot || null,
+        // Image Edit history: the artist's own instruction (✎ Reuse) and which checkpoint a ↻ Redo repeats.
+        editInstruction: job.editInstruction || null,
+        redoOf: job.redoOf || null,
+        fixOf: job.fixOf || null,
+        autoFix: job.autoFix ? true : undefined,
         promptSource: job.promptSource || 'ideation', learnedFrom: job.learnedFrom || null,
         researchId: job.researchId || null,
         promptSetId: job.promptSetId || null,
@@ -1652,7 +1697,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           return card;
         }
 
-        if (State.settings.gen.skipQc) {
+        if (State.settings.gen.skipQc && !job.forceQc) {
           card.qc = null;
           card.qcSkipped = true;
           card.status = 'metadata';
@@ -1663,8 +1708,9 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
 
         let pass;
         try {
-          const out = await this.inspect(item.base64, item.mime, job.prompt);
+          const out = await this.inspect(item.base64, item.mime, job.basePrompt || job.prompt);
           pass = this.applyQcResult(card, out.qc, out.meta);
+          if (card.fixOf && window.ImageEdit) ImageEdit.noteFixResult(card);
           card.error = null;
           delete card.qcAttempt;
           if (card.qc && card.qc.veto && card.qc.veto.checked === 'disputed') {
@@ -1686,6 +1732,9 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           State.persistLibrary();
           State.bumpStats({ imagesFailed: 1 });
           log(`QC FAIL (${card.qc.score}/10): ${card.qc.defects.slice(0, 2).join('; ') || card.qc.notes}`, 'err');
+          // A failed REPAIR waits for its batch: a re-render makes several seeds, and one
+          // failing while its sibling passes is not a reason to try again (finishBatch decides).
+          if (window.ImageEdit && !(job.autoFix && job.fixOf)) await ImageEdit.maybeAutoFix(card).catch(() => null);
           return card;
         }
 

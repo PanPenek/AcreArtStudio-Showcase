@@ -176,7 +176,13 @@ The artist writes and publishes the post themselves; this module only saves them
 
 Settings arrive over IPC only after the page has drawn, so a mirror in localStorage is read synchronously here to stop every launch from flashing the wrong palette. app.js re-applies the real setting once it loads.
 
-### `src/renderer/app.js` <sub>(6,366 lines)</sub>
+### `src/renderer/navorder.js` <sub>(207 lines)</sub>
+
+**The sidebar tabs in the artist's own order.**
+
+Hold a tab for one second and it lifts; drag it and the other tabs slide out of its way; let go and it settles into the gap (Esc puts it back). The order is saved as `settings.ui.tabOrder` and mirrored in localStorage so it is on screen before the first paint, like the theme. A tab added by an update lands after its shipped neighbour, and Ctrl+number shortcuts stay with the tab name.
+
+### `src/renderer/app.js` <sub>(6,409 lines)</sub>
 
 **UI wiring. Builds and updates every tab (Dashboard, Review, Drafts, Statistics, Settings...), connects buttons to the engines in the other modules and keeps the screen in sync with the store.**
 
@@ -229,6 +235,8 @@ Perchance has no API, so the driver operates the page like a person would: fill 
 **Local image and video generation through a ComfyUI server.**
 
 The second generation engine, with the same contract as the Perchance driver: `generate(prompt, opts, log)` returns `{ images: [{ base64, mime, w, h }] }`, so everything downstream does not care which engine made the pixels. The key idea: THE WORKFLOW FILE IS THE CONFIG. Any ComfyUI graph can be used. On every job the driver re-reads the file and works out what to touch: it traces the prompt nodes back from the sampler, randomises the seed per image, and collects whatever the save nodes produce. Both of ComfyUI's file formats (API and editor, including subgraphs) are supported. If the server is not running, the driver starts it from Settings and waits for it.
+
+Image edits come back at the source picture's size: `matchEditSize` rewires the sampler onto the Qwen encoder's own `<image1>` canvas (the source aspect at about one megapixel) and puts one lanczos `ImageScale` in front of the save node, on a copy of the graph.
 
 ---
 
@@ -450,6 +458,16 @@ One prompt is usually rendered several times; the real decision is "which of the
   U        undo the last batch            Esc     close
 Repaints are split so toggling a keeper never re-decodes the images.
 ```
+
+### `src/renderer/imageedit.js` <sub>(722 lines)</sub>
+
+**The engine behind the Image Edit tab and the 🩹 Fix button.**
+
+Qwen-Image 2.1 both generates and edits: the picture goes in as `<image1>` and the model re-renders the whole frame from it plus an instruction. A brushed area only becomes words ("in the top-left area of the picture: …"); nothing is masked or pasted. Every result is a new card. Repairs are routed in code from QC's own findings: local damage (hands, face, detail) gets an edit that keeps the look, while a broken body gets a fresh render on new seeds with a vision-rewritten prompt (same character, outfit and scene, one simple pose). When a vision model is available it describes the corrected picture first, which steers the editor far better than a list of defects. Auto-fix (off by default) repairs a picture that fails QC, up to two tries, always from the original. The edit history is rebuilt from the library and the queue every time, so it survives restarts.
+
+### `src/renderer/imageeditui.js` <sub>(521 lines)</sub>
+
+**The Image Edit tab and the 🩹 Fix menu on cards.** Picture on the left, a history panel of numbered checkpoints on the right (#0 is the original): click one to edit from it, ⟲ Undo, ↻ Redo with a new seed, ✎ Reuse an instruction, ✕ discard and restore. Editing from an older checkpoint starts an indented branch; holding Space shows the checkpoint before.
 
 ### `src/renderer/teaser.js` <sub>(211 lines)</sub>
 

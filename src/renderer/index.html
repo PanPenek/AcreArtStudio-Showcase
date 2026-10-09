@@ -29,6 +29,7 @@
       <button class="nav-btn" data-tab="overseer"><span class="nav-ico">☰</span>Overseer<span class="nav-badge" id="badge-overseer" hidden title="Cards the Overseer made that are still waiting in Review — not unread messages">0</span></button>
             <button class="nav-btn" data-tab="promptlab"><span class="nav-ico">✧</span>Prompt Lab</button>
       <button class="nav-btn" data-tab="review"><span class="nav-ico">◉</span>Review<span class="nav-badge" id="badge-review" hidden>0</span></button>
+      <button class="nav-btn" data-tab="imageedit" title="Edit a picture with Qwen-Image: brush an area and describe the change, or describe a change to the whole picture"><span class="nav-ico">✎</span>Image Edit</button>
       <button class="nav-btn" data-tab="drafts"><span class="nav-ico">⇪</span>Drafts<span class="nav-badge" id="badge-drafts" hidden>0</span></button>
       <button class="nav-btn" data-tab="stats"><span class="nav-ico">▤</span>Statistics</button>
       <!-- New tabs go AFTER Statistics, never before Review. Ctrl+1…9 is positional, and
@@ -42,6 +43,9 @@
       <button class="nav-btn" data-tab="patreon"><span class="nav-ico">◔</span>Patreon<span class="nav-badge" id="badge-patreon" hidden>0</span></button>
       <button class="nav-btn" data-tab="settings"><span class="nav-ico">⚙</span>Settings</button>
     </nav>
+    <!-- Right after the <nav>, so the artist's own tab order is on it before the first paint
+         (hold a tab 1 s and drag to reorder — see navorder.js). -->
+    <script src="navorder.js"></script>
     <div class="sidebar-foot">
       <div id="side-health" class="side-health"></div>
       <div class="worker-pill" id="worker-pill"><span class="dot"></span><span id="worker-pill-text">Worker idle</span></div>
@@ -378,6 +382,71 @@
         <kbd>←</kbd>/<kbd>→</kbd> browse while zoomed · <kbd>Esc</kbd> close
       </div>
       <div id="review-grid" class="review-grid"></div>
+    </section>
+
+    <!-- IMAGE EDIT -->
+    <!-- One picture, edited by Qwen-Image 2.1 (imageedit.js / imageeditui.js). The red brush
+         only says WHERE: it becomes words in the instruction, never a mask. Results are new
+         cards in Review; the source is never overwritten. -->
+    <section class="tab-pane" id="pane-imageedit">
+      <div class="pane-head ie-head">
+        <div>
+          <h1>Image Edit</h1>
+          <div class="pane-sub" id="ie-src">no picture loaded</div>
+        </div>
+        <div class="btn-row">
+          <label class="ie-inline" title="Pictures per edit — each is one render (~1 min)">Pictures
+            <select id="ie-count"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+          <button class="btn" id="ie-upload">Upload…</button>
+          <input type="file" id="ie-file" accept="image/png,image/jpeg,image/webp" hidden />
+        </div>
+      </div>
+      <div class="hint err" id="ie-engine" hidden>Image edits need the ComfyUI engine (Settings → Generation). Perchance cannot take a picture as input.</div>
+      <div class="ie-empty" id="ie-empty">
+        Press <b>✎ Edit</b> on a card in Review, or <b>Upload…</b> / drop / paste a picture here.
+      </div>
+      <div id="ie-stage" hidden>
+        <div class="ie-layout">
+          <div class="ie-main">
+            <div class="ie-tools">
+              <label class="ie-inline">Brush <input type="range" id="ie-brush" min="4" max="256" value="48" /> <output id="ie-brush-out">48</output></label>
+              <button class="btn ghost small" id="ie-clear">Clear</button>
+              <span class="hint">Brush over a part of the picture, then say what should change there. Hold <kbd>Space</kbd> to see the checkpoint before.</span>
+            </div>
+            <div class="ie-canvas-wrap" id="ie-canvas-wrap">
+              <div class="ie-canvas">
+                <img id="ie-img" alt="" draggable="false" />
+                <canvas id="ie-mask"></canvas>
+              </div>
+              <div class="ie-peek" id="ie-peek" hidden></div>
+              <div class="ie-pop panel" id="ie-pop" hidden>
+                <div class="hint" id="ie-pop-where"></div>
+                <textarea id="ie-pop-text" rows="3" maxlength="1200" placeholder="What should change here? e.g. make the lantern glow blue"></textarea>
+                <div class="btn-row"><button class="btn primary small" id="ie-pop-go">Edit</button><button class="btn ghost small" id="ie-pop-cancel">Cancel</button></div>
+              </div>
+            </div>
+          </div>
+          <aside class="ie-hist">
+            <div class="ie-hist-inner">
+              <div class="ie-hist-head">
+                <span class="ie-hist-title">History</span>
+                <button class="btn ghost small" id="ie-undo" title="Back to the checkpoint this one was made from">⟲ Undo</button>
+              </div>
+              <div class="ie-hist-list" id="ie-hist-list"></div>
+              <div class="ie-hist-foot">
+                <button class="btn small" id="ie-fix">🩹 Fix ▾</button>
+                <button class="btn ghost small" id="ie-show-off" hidden></button>
+              </div>
+            </div>
+          </aside>
+        </div>
+        <div class="ie-prompt-row">
+          <textarea id="ie-prompt" rows="2" maxlength="1500" placeholder="Change the whole picture… e.g. make it night time with neon lights (Enter to edit, Shift+Enter for a new line)"></textarea>
+          <button class="btn primary" id="ie-go">Edit</button>
+        </div>
+        <div class="hint ie-from-line"><span id="ie-from"></span><span id="ie-status"></span></div>
+        <div class="hint ie-licence">Qwen-Image 2.1 is under the Qwen Research Licence (non-commercial).</div>
+      </div>
     </section>
 
     <!-- DRAFTS -->
@@ -801,6 +870,9 @@
      so load order only has to guarantee they exist before the first tick — but keeping it
      here documents the dependency. -->
 <script src="overseer.js"></script>
+<!-- After pipeline.js and overseer.js: edit jobs reuse Pipeline.makeJob and Overseer.editPrompt. -->
+<script src="imageedit.js"></script>
+<script src="imageeditui.js"></script>
 <script src="health.js"></script>
 <script src="providers.js"></script>
 <script src="originsui.js"></script>

@@ -111,6 +111,25 @@ const DEFAULT_SETTINGS = {
     qcDetailFloor: 0,
     skipQc: false,
     autoPick: false,
+    /**
+     * Auto-fix (imageedit.js): when a picture FAILS QC, queue a repair render of it — a
+     * Qwen-Image edit of itself built from its own QC findings. Off by default: it is an
+     * extra render + QC pass per failed picture. Never fixes a fix.
+     */
+    autoFix: false,
+    /** Auto-fix attempts per failed picture (1–2). Each one repairs the ORIGINAL from its QC
+     *  findings and is QC'd again; after the last failed try the picture stays discarded. */
+    autoFixTries: 2,
+    /** Repairs may be a fresh RE-RENDER (new seed, same character/outfit/scene, simple pose)
+     *  when QC says the body itself is broken, and always for a second try. false = edits only. */
+    fixRerender: true,
+    /** Seeds per re-render repair (1–4); the repair counts as fixed when any one passes QC. */
+    rerenderSeeds: 2,
+    /**
+     * Image Edit: ask "edit anyway?" when the picture's size differs from the workflow's
+     * native size. The result keeps the picture's size either way; false skips only the popup.
+     */
+    editSizeWarning: true,
     skipMetadata: false,
     metadataOnlyInspected: false,
     qcMaxEdge: 1024,
@@ -269,6 +288,9 @@ const DEFAULT_SETTINGS = {
     showPixiv: false,
     showPerchance: false,
     showDeviantArt: true,
+    // The sidebar tab order the artist dragged into place (hold a tab 1 s, drag). null = the
+    // shipped order. Tabs added by an update are slotted in after their shipped neighbour.
+    tabOrder: null,
     theme: 'verdant',
     triage: { keepTo: 'review', meta: 'none', order: 'newest' },
   },

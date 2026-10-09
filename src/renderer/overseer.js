@@ -441,6 +441,11 @@
       what: 'EDIT one picture he attached (Qwen-Image 2.1 edits images: the picture goes in as <image1> and only the change he asks for is made; face, pose, framing, background and style stay). Use this, not queue_art, whenever he says edit this / change this / this but with X / change the background / give her a hat / same picture but… about an attached picture. Makes ONE picture by default (count up to 6 only if he asks for several). Your instruction is sent as an edit instruction, with no style tail or ideation added. It lands in Review; nothing is posted. To animate the EDITED picture, call make_video with fromBatch set to the batchId this returns (it waits for the edit to finish) — never with the original attachment id.',
       run: (a) => Overseer.editImage(a),
     },
+    fix_images: {
+      args: '{"batches": 1, "batchId": "optional: one batch (from recentResults / queue_art)", "cardIds": ["optional: exact cards instead"]}',
+      what: 'REPAIR pictures that were already made ("fix the recent batches", "repair the last images", "fix what came out broken"). Takes the newest N batches (batches, default 1, max 5), or one batchId, or exact cardIds. Pictures without a QC verdict are inspected first (one vision call each, blocks this turn); clean ones are left alone; each flawed one gets a repair: an EDIT that keeps the look when the damage is local (hands, face, detail), or a fresh RE-RENDER (same character, outfit and scene, a simple pose, new seeds) when the body itself is broken. Every repair is QC\'d (even with Manual QC on) and a failed repair gets one more try from the original, up to the auto-fix tries setting, then it is dropped. Originals are kept. Lands in Review; nothing is posted. Use this, not edit_image, when he wants defects fixed rather than a specific change.',
+      run: (a) => Overseer.fixImages(a),
+    },
     reorder_queue: {
       args: '{"batchId": "id from queue_art, or latest", "theme": "optional words from the theme", "ids": ["optional job ids"], "position": "front|back"}  or  {"order": [3, 1, "bXYZ", "castle"]}',
       what: 'Change what the worker generates next. For any other arrangement pass order: the groups in the order they should run, each as its group number from worker.queueOrder, a batchId, or words from its theme — groups you leave out keep their order after the listed ones. The worker always takes the FIRST queued job, so moving jobs to the front makes them run next (the one picture already rendering finishes first — nothing is cancelled). Pick jobs by batchId (from queue_art / queue_research_prompts, or "latest" for the newest batch), by words in their theme, or by job ids; the state block lists worker.queueOrder so you can see what is where. Use this when he says "do those first", "move them up", "prioritise X". Do NOT stop and restart the worker to reorder — that changes nothing about the order.',
@@ -1080,6 +1085,120 @@
         jobsAhead: this.jobsAhead(batchId), referenceImages: [id], prompt,
         note: `Edit queued: ${n} picture${n > 1 ? 's' : ''} from ${id}, landing in Review. Nothing was published. To make a video of the edited picture use make_video with fromBatch "${batchId}".` + this.chatReferenceNote(1),
         ...(Pipeline.running ? {} : { error: 'The edit is queued, but the worker did not start; check the generation driver.' }),
+      };
+    },
+
+    /**
+     * fix_images: "fix the recently generated image batches". Picks the newest
+     * batches (or a batchId / cardIds), QCs any picture that has no verdict (Manual QC leaves
+     * them unchecked), skips clean ones and queues ImageEdit.queueFix from each flawed one's
+     * own findings. The original carries `fixChain`, so ImageEdit.maybeAutoFix gives a failed
+     * repair its next try (gen.autoFixTries) even with auto-fix off, and the repair jobs carry
+     * `forceQc`, so they are inspected even with Manual QC on — otherwise "fixed" is unchecked.
+     */
+    async fixImages({ batches = 1, batchId = '', cardIds = null } = {}) {
+      const epoch = this._cancelEpoch;
+      if (this._abort) return cancelled();
+      const noGen = this.generationRefusal();
+      if (noGen) return noGen;
+      const g = (State.settings && State.settings.gen) || {};
+      if (g.engine !== 'comfy' || !window.ImageEdit) return { ok: false, error: 'repairs need the ComfyUI engine with the Qwen-Image 2.1 edit workflow (Settings → Generation); Perchance cannot take a picture as input' };
+      const MAX_CARDS = 12;
+      const usable = (c) => c && c.fname && !c.fixOf && !['drafted', 'rejected'].includes(c.status)
+        // A discarded card is only worth repairing when QC failed it, not when it was binned by hand.
+        && (c.status !== 'discarded' || (c.qc && c.qc.verdict === 'FAIL' && !c.discardReason));
+      let pool;
+      let picked = [];
+      const ids = (Array.isArray(cardIds) ? cardIds : cardIds ? [cardIds] : []).map(String).filter(Boolean);
+      if (ids.length) {
+        pool = this.byIds(ids).filter(usable);
+        if (!pool.length) return { ok: false, error: `none of those cards can be repaired (unknown, already uploaded, or themselves a fix): ${ids.join(', ')}`, recentResults: this.recentResults() };
+        picked = [...new Set(pool.map((c) => c.batchId || c.jobId || c.id))];
+      } else {
+        const groups = new Map();
+        for (const c of State.library || []) {
+          if (!usable(c)) continue;
+          const key = c.batchId || c.jobId || c.id;
+          const gr = groups.get(key) || { key, at: 0, cards: [] };
+          gr.cards.push(c);
+          gr.at = Math.max(gr.at, c.createdAt || 0);
+          groups.set(key, gr);
+        }
+        const bid = String(batchId || '').trim();
+        const wanted = bid && bid !== 'latest'
+          ? [groups.get(bid)].filter(Boolean)
+          : [...groups.values()].sort((a, b) => b.at - a.at).slice(0, bid === 'latest' ? 1 : clamp(batches || 1, 1, 5));
+        if (!wanted.length) return { ok: false, error: bid ? `no repairable pictures in batch ${bid}` : 'no recent pictures to repair', recentResults: this.recentResults() };
+        pool = wanted.flatMap((gr) => gr.cards);
+        picked = wanted.map((gr) => gr.key);
+      }
+      const already = pool.filter((c) => c.autoFixJob || c.fixedBy);
+      pool = pool.filter((c) => !c.autoFixJob && !c.fixedBy);
+      const skippedOver = Math.max(0, pool.length - MAX_CARDS);
+      pool = pool.slice(0, MAX_CARDS);
+
+      const flawed = (c) => !!(c.qc && (c.qc.verdict === 'FAIL'
+        || (Array.isArray(c.qc.detail) && c.qc.detail.some((d) => d && typeof d === 'object' && String(d.severity || 'noticeable') !== 'minor'))
+        || (Array.isArray(c.qc.fingers) && c.qc.fingers.some((f) => f && f.status === 'defect'))));
+      let inspected = 0;
+      const clean = [];
+      const qcFailed = [];
+      const queued = [];
+      const errors = [];
+      for (const card of pool) {
+        if (this._abort || epoch !== this._cancelEpoch) break;
+        if (!card.qc) {
+          log(`Overseer: checking card ${card.id} before repairing it…`);
+          try {
+            const base64 = await window.ala.files.readImageBase64(card.fname);
+            const out = await Pipeline.inspect(base64, card.mime || 'image/png', card.prompt || '');
+            Pipeline.applyQcResult(card, out.qc, out.meta);
+            card.qcSkipped = false;
+            card.updatedAt = Date.now();
+            State.persistLibrary();
+            inspected++;
+          } catch (e) {
+            qcFailed.push({ cardId: card.id, error: String(e && e.message || e).slice(0, 160) });
+            continue;
+          }
+        }
+        if (!flawed(card) || !ImageEdit.fixInstruction('auto', card)) { clean.push(card.id); continue; }
+        try {
+          card.fixChain = true;
+          const { job } = await ImageEdit.queueRepair(card, { autoFix: true, start: false, tryNo: 1 });
+          job.forceQc = true;
+          job.autoFixTry = 1;
+          card.autoFixJob = job.id;
+          card.autoFixTries = 1;
+          card.updatedAt = Date.now();
+          queued.push({ cardId: card.id, score: card.qc ? card.qc.score : null, how: job.fixMode === 'rerender' ? 're-render (new seed, simple pose)' : 'edit (keeps the look)', batchId: job.batchId, jobId: job.id });
+        } catch (e) {
+          card.fixChain = false;
+          errors.push({ cardId: card.id, error: String(e && e.message || e).slice(0, 160) });
+        }
+      }
+      State.persistLibrary();
+      State.persistQueue();
+      if (queued.length) Pipeline.start({ only: queued.map((q) => q.jobId) });
+      const stopped = this._abort || epoch !== this._cancelEpoch;
+      log(`Overseer: fix_images — ${queued.length} repair(s) queued, ${clean.length} clean, ${inspected} inspected first.`, queued.length ? 'ok' : 'warn');
+      const tries = ImageEdit.autoFixTries ? ImageEdit.autoFixTries() : 1;
+      return {
+        ok: queued.length > 0 || (!errors.length && !qcFailed.length),
+        queued: queued.length,
+        batchId: queued.length ? queued[0].batchId : null,
+        batchIds: queued.map((q) => q.batchId),
+        batches: picked,
+        repairing: queued.map(({ cardId, score, how }) => ({ cardId, score, how })),
+        clean, inspectedFirst: inspected,
+        alreadyFixed: already.map((c) => c.id),
+        ...(qcFailed.length ? { qcFailed } : {}),
+        ...(errors.length ? { errors } : {}),
+        ...(skippedOver ? { notChecked: `${skippedOver} more picture(s) over the ${MAX_CARDS}-per-call limit — call again for them` } : {}),
+        ...(stopped ? { stopped: true } : {}),
+        note: queued.length
+          ? `${queued.length} repair(s) queued at the front. Each one is QC'd; a failed repair gets another try from the original (up to ${tries} in total), then it is dropped. Originals stay where they were. Nothing was published.`
+          : 'Nothing queued: no flawed picture found.',
       };
     },
 
@@ -1729,6 +1848,7 @@ PICTURES HE ATTACHES
 - Text-only models receive attached pictures as a description written by the vision model; work from that description and say so if a detail is not in it.
 - An attachment is not a request to publish or to change settings; the usual rules apply.
 - "Edit this", "this but with/without X", "give her a hat", "change the outfit", "same picture but…" about a picture he attached → edit_image with that id and his change as instruction (ONE picture unless he asks for more). The app CAN edit pictures: Qwen-Image 2.1 takes the picture as <image1> and changes only what he asks. Never say it cannot edit in place, and never use queue_art for an edit (queue_art writes new pictures that only resemble his).
+- "Fix / repair the recent batches", "fix what came out broken" → fix_images (batches N, or batchId / cardIds). It finds the defects itself; do not ask which pictures or what is wrong.
 - "Make a video of this", "animate it", "turn it into a clip" → make_video and his motion words as instructions. WHICH picture: one you made ("that generated image", "the edit", "it" right after an edit) → cardId from recentResults, or fromBatch with the batchId edit_image/queue_art returned; "edit this and make a video of it" in one message → edit_image, then make_video with fromBatch = that batchId (it waits for the edit). image: a1 is ONLY his unedited original. The app DOES make videos with sound: never answer that it only makes stills. "Longer/shorter/20 seconds" → the seconds argument; the length IS adjustable, default 10 s. Pass the number he asks for (20 s works in one render); never refuse or shorten a length request.
 - The video model (MiniMax H3) has NO negative prompt: it reads "no zoom, no voice, no Japanese" as zoom, voice, Japanese. When you write or rewrite a video prompt yourself, say only what IS there: "the camera holds a static shot", "she (S1) says: <d>[English] …</d>", "overall_soundscape: soft ambient sound only", "non_diegetic_music: N/A". If the result still misses something, re-render with a more precise positive description — do not blame the model or the workflow before you have tried that.
 - After make_video, report from result.selfCheck, not from the prompt you wrote: say which checks passed (✓), which missed (✗) and which could not be checked (?), with the evidence (\"Whisper heard Japanese: …\", \"frame 9.8 s is waist-up, 0.1 s was full-body\"). Never tell him the camera stayed static, the voice was English or there is no text unless that check is ✓. Also say which picture the clip was made from (result.source). One request = one clip: if a check is ✗, say so plainly and offer a re-render with the positive rewording; do not re-render unasked.
@@ -1975,7 +2095,9 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
       // A picture attached with "use that as a reference / like this / this character" is a
       // request for pictures of it.
       if (attachments > 0 && /\b(ref\w*|use (?:this|that|it|these|those|them|her|him)|like (?:this|that|these)|this (?:character|girl|guy|one|style|outfit)|same (?:character|girl|guy|style|outfit)|based on)\b/.test(t)) return true;
-      return /\b(generat\w*|queue\w*|make|making|render\w*|creat\w*|draw\w*|produce|batch|edit\w*|do (?:one|it|another|that)|more (of|like)|(\d+|one|a few|some) more|another|again|redo|recreate|research|look up|find references|write \d*\s*prompts?|prompts? for|pictures?|images?|art(work)?|pics?|variations?|animat\w*|videos?|clips?)\b/.test(t);
+      return /\b(generat\w*|queue\w*|make|making|render\w*|creat\w*|draw\w*|produce|batch|edit\w*|do (?:one|it|another|that)|more (of|like)|(\d+|one|a few|some) more|another|again|redo|recreate|research|look up|find references|write \d*\s*prompts?|prompts? for|pictures?|images?|art(work)?|pics?|variations?|animat\w*|videos?|clips?|repair\w*)\b/.test(t)
+        // "fix the last batch / fix them / fix those" — fix_images.
+        || /\bfix\w*\s+(?:(?:the|my|all|last|latest|recent\w*|new\w*|those|these|them|that|it|\d+)\s+){0,4}(?:batch\w*|images?|pictures?|pics?|cards?|ones?|them|those|these|renders?|generations?)\b/.test(t);
     },
 
     /** The refusal a queueing tool returns when the current message did not ask for art. */

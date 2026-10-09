@@ -49,6 +49,12 @@
 
     Theme.apply(State.settings.ui?.theme || Theme.DEFAULT);
     applyTabVisibility();
+    // Same for the sidebar order: navorder.js applied the local mirror before the first paint;
+    // settings are the authority. Hold a tab 1 s and drag to reorder.
+    if (window.NavOrder) {
+      NavOrder.apply(State.settings.ui?.tabOrder || null);
+      NavOrder.wire({ changed: saveTabOrder });
+    }
 
     wireNav();
     wireHealth();
@@ -70,6 +76,7 @@
     PixivUI.wire();
     OverseerUI.wire();
     TriageUI.wire();
+    ImageEditUI.wire();
     renderSettings();
     wireSettings();
 
@@ -228,6 +235,7 @@
     if (tab === 'continuations' && window.ContinuationsUI) ContinuationsUI.render();
     if (tab === 'pixiv' && window.PixivUI) PixivUI.refreshStatus();
     if (tab === 'overseer' && window.OverseerUI) { OverseerUI.render(); OverseerUI.focusInput(); }
+    if (tab === 'imageedit' && window.ImageEditUI) ImageEditUI.render();
   }
 
   function wireDashboard() {
@@ -2719,6 +2727,9 @@
           ${c.promptSource === 'comic' ? `<span class="src-badge" title="A composed comic page. It was never QC'd — a page is judged by eye, not by the anatomy inspector.">comic page</span>` : ''}
           ${c.promptSource === 'teaser' ? `<span class="src-badge" title="The blurred public copy. The full-resolution original is on the Patreon route.">◔ teaser</span>` : ''}
           ${c.teaserId ? `<span class="src-badge deviantart" title="A blurred teaser of this image was made and is headed for DeviantArt. This card is the full-resolution original.">original · teased</span>` : ''}
+          ${c.fixOf ? `<span class="src-badge" title="${esc(`A repair of card ${c.fixOf}${c.autoFix ? ' (automatic, after it failed QC)' : ''}: ${c.editLabel || ''}`)}">🩹 fix${c.fixDelta && c.fixDelta.from != null && c.fixDelta.to != null ? ` ${c.fixDelta.from}→${c.fixDelta.to}` : ''}</span>`
+            : c.editPrompt ? `<span class="src-badge" title="${esc(`An edit of ${c.editRoot || 'a picture'}: ${c.editLabel || ''}`)}">✎ edit</span>` : ''}
+          ${c.fixedBy ? `<span class="src-badge none" title="A repaired copy of this picture exists (card ${esc(c.fixedBy)})">fixed copy made</span>` : ''}
           ${qc ? `<span class="qc-score ${qc.verdict === 'PASS' ? 'good' : 'bad'}">${qc.score}/10</span>
           <span class="qc-defects" title="${esc((qc.defects || []).join('\n'))}${qcCaps.length ? esc('\n\n' + qcCaps.map((k) => `lowered by ${k.by}: ${k.why}`).join('\n')) : ''}${qc.gates && qc.gates.no ? esc(`\n\ngeneral pass: ${qc.gates.no}/${qc.gates.answered} gates NO (${qc.gates.failed.join(', ')})`) : ''}${qc.metrics ? esc(`\n\ndetail ${qc.metrics.detail} · sharp ${qc.metrics.sharp} · flat ${qc.metrics.flat}${qc.metrics.detailPercentile != null ? ` · ${qc.metrics.detailPercentile}th percentile of your library` : ''}`) : ''}${qc.engine ? esc(`\n\ninspected by ${qc.engine}${qc.model ? ' · ' + qc.model : ''}${qc.latencyMs ? ' · ' + Math.round(qc.latencyMs / 1000) + 's' : ''}${qc.passes > 1 ? ' · ' + qc.passes + ' passes' : ''}${qc.promptTokens || qc.completionTokens ? `\n${qc.promptTokens} tokens in (prompt + image), ${qc.completionTokens} out` : ''}`) : ''}">${qc.defects && qc.defects.length ? esc(qc.defects[0]) : esc(qc.notes || '')}</span>` : ''}
           ${!qc && c.qcSkipped ? `<span class="src-badge none" title="AI quality check was off when this was generated — your call">not inspected</span>` : ''}
@@ -2785,6 +2796,8 @@
               : 'Delete the blurred copy and put this card back on the DeviantArt route'}">◔ Undo teaser</button>`
             : '') : ''}
           ${editable ? `<button class="btn" data-act="upscale" title="Send to ImgUpscaler">⤢ ${c.upscaled ? 'Re-upscale' : 'Upscale'}</button>` : ''}
+          ${c.fname ? `<button class="btn ghost small" data-act="imageedit" title="Open this picture in the Image Edit tab — brush an area and describe the change. The result is a new card; this one is kept.">✎ Edit</button>
+          <button class="btn ghost small" data-act="fixmenu" title="Re-render this picture as a repair of itself (fingers, mushed detail, proportions, face, or from its QC findings). The result is a new card; this one is kept.">🩹 Fix ▾</button>` : ''}
           ${c.upscaled ? `<button class="btn ghost small" data-act="unupscale" title="Restore the original image">↩</button>` : ''}
           <button class="btn ghost small" data-act="convertvideo"
             title="Upload this image to the ComfyUI video workflow — the motion prompt can be written by the model, by you, or both. Takes a few minutes on the GPU.">🎬 ${c.video ? 'Re-make video' : 'Convert to video'}</button>
@@ -2970,6 +2983,11 @@
           reportSend(card, res);
           btn.disabled = false;
           btn.textContent = label;
+        } else if (act === 'imageedit') {
+          switchTab('imageedit');
+          await ImageEditUI.open({ cardId: card.id });
+        } else if (act === 'fixmenu') {
+          ImageEditUI.openFixMenu(card, btn);
         } else if (act === 'upscale') {
           if (drive.timer || (pendingUpscale && pendingUpscale !== card.id)) {
             if (!upscaleQueue.includes(card.id)) upscaleQueue.push(card.id);
@@ -4910,6 +4928,14 @@
   ];
   let setSection = 'status';
 
+  /** Persist a dragged sidebar order (null = back to the shipped order). */
+  function saveTabOrder(order) {
+    State.settings.ui = { ...(State.settings.ui || {}), tabOrder: order };
+    const btn = $('#btn-reset-tab-order');
+    if (btn) btn.disabled = !order;
+    window.ala.settings.patch({ ui: { tabOrder: order } }).then((s) => { State.settings = s; });
+  }
+
   function renderThemeCards() {
     const row = $('#theme-row');
     if (!row) return;
@@ -5072,7 +5098,7 @@
       <div class="btn-row"><button class="btn small" id="btn-comfy-test">Test server</button><span class="hint" id="comfy-status"></span></div>
     </div>
 
-    <div class="panel" data-find="qc quality threshold retries cooldown skip manual inspect discard parallel lane speed background concurrent">
+    <div class="panel" data-find="qc quality threshold retries cooldown skip manual inspect discard parallel lane speed background concurrent image edit size warning popup different sized picture resolution auto fix repair re-render">
       <h3>Quality check &amp; retries</h3>
       <p class="panel-sub">What happens between "the image exists" and "it reaches Review".</p>
       <div class="fld-row">
@@ -5086,6 +5112,10 @@
         straight to the “Rejected by DeviantArt” shelf on the Drafts tab.</div>
       <div class="checkbox-row"><input type="checkbox" id="set-autoUpload" ${s.gen.autoUploadApproved ? 'checked' : ''} /><span>Publish as soon as I approve <em>— to every site the card is routed to; with “Submit after upload” on, approving puts it live</em></span></div>
       <div class="checkbox-row"><input type="checkbox" id="set-skipqc" ${s.gen.skipQc ? 'checked' : ''} /><span><b>Manual QC</b> — skip the AI quality check entirely <em>(same switch as on the Dashboard)</em></span></div>
+      <div class="checkbox-row"><input type="checkbox" id="set-edit-size-warning" ${s.gen.editSizeWarning !== false ? 'checked' : ''} /><span><b>Warn before editing a different-sized picture</b> — Image Edit asks “edit anyway?” when the picture's size differs from the workflow's native size, since that can lower the edit quality <em>(the result keeps the picture's size either way)</em></span></div>
+      <div class="checkbox-row"><input type="checkbox" id="set-autofix" ${s.gen.autoFix ? 'checked' : ''} /><span><b>Auto-fix failed pictures</b> — when a picture fails QC, repair it (Qwen edit built from its QC findings) and QC the repair; if that fails too, try again up to <b>Auto-fix tries</b>, then it stays discarded <em>(ComfyUI only; ~1 min + one QC pass per try; every try repairs the original, never the previous repair; all versions are kept${s.gen.skipQc ? ' — <b>does nothing while Manual QC is on</b>, because nothing fails QC then' : ''})</em></span></div>
+      <div class="fld-row"><label class="fld slim" title="1 = one repair, then discard. 2 = a second repair if the first one also fails QC."><span>Auto-fix tries</span><input type="number" min="1" max="2" data-set="gen.autoFixTries" value="${Number(s.gen.autoFixTries) === 1 ? 1 : 2}" /></label><label class="fld slim" title="How many new seeds a re-render repair makes; it counts as fixed when any one passes QC."><span>Re-render seeds</span><input type="number" min="1" max="4" data-set="gen.rerenderSeeds" value="${Number(s.gen.rerenderSeeds) || 2}" /></label></div>
+      <div class="checkbox-row"><input type="checkbox" id="set-fix-rerender" ${s.gen.fixRerender !== false ? 'checked' : ''} /><span><b>Re-render when the body is broken</b> — a repair is an <em>edit</em> (keeps the look) when QC found local damage (hands, face, detail), and a fresh <em>re-render</em> on new seeds (same character, outfit and scene, a simple pose) when QC says the body itself is broken; a second try is always a re-render <em>(off = every repair is an edit)</em></span></div>
       <div class="note">Generation still runs; only the inspection is skipped, so nothing
         is auto-discarded and every image lands in Review for you to sort. On a 6-image turn the
         inspection <em>is</em> the pipeline's cost — this is the difference between minutes and
@@ -5645,6 +5675,12 @@
       <h3>Theme</h3>
       <p class="panel-sub">Applies straight away — no restart. Saved with your settings, so it survives one.</p>
       <div class="theme-row" id="theme-row"></div>
+    </div>
+
+    <div class="panel" data-find="sidebar tabs order reorder rearrange move drag hold layout menu navigation">
+      <h3>Sidebar order</h3>
+      <p class="panel-sub">Hold any tab in the sidebar for a second, then drag it where you want it — the others slide out of the way. Esc while dragging puts it back. Ctrl+number shortcuts stay with their tab, wherever it goes.</p>
+      <div class="btn-row"><button class="btn" id="btn-reset-tab-order" ${s.ui?.tabOrder ? '' : 'disabled'}>Reset to the default order</button></div>
     </div>`);
 
     renderSettingsNav();
@@ -6076,6 +6112,9 @@
     bindCheck('#set-autoUpload', (v) => ({ gen: { autoUploadApproved: v } }));
     bindCheck('#set-comfy-autogif', (v) => ({ comfy: { autoGif: v } }));
     bindCheck('#set-upscale-auto', (v) => ({ gen: { upscaleAuto: v } }));
+    bindCheck('#set-autofix', (v) => ({ gen: { autoFix: v } }));
+    bindCheck('#set-fix-rerender', (v) => ({ gen: { fixRerender: v } }));
+    bindCheck('#set-edit-size-warning', (v) => ({ gen: { editSizeWarning: v } }));
     bindCheck('#set-parallelqc', (v) => ({ gen: { parallelQc: v } }));
     bindCheck('#set-qc-veto', (v) => ({ gen: { qcVeto: v } }));
     bindCheck('#set-qc-confirm-veto', (v) => ({ gen: { qcConfirmVeto: v } }));
@@ -6165,6 +6204,7 @@
     $('#btn-open-lib').addEventListener('click', () => window.ala.files.openLibrary());
     $('#btn-open-perchance')?.addEventListener('click', () => switchTab('perchance'));
     bindCheck('#set-start-hidden', (v) => ({ ui: { startHidden: v } }));
+    $('#btn-reset-tab-order')?.addEventListener('click', () => { if (window.NavOrder) NavOrder.reset(); });
     for (const [id, key] of [['#set-show-pixiv', 'showPixiv'], ['#set-show-perchance', 'showPerchance'], ['#set-show-da', 'showDeviantArt']]) {
       $(id)?.addEventListener('change', async (e) => {
         State.settings.ui = { ...(State.settings.ui || {}), [key]: e.target.checked };

@@ -11,6 +11,9 @@
  *   - titles.js       : near-duplicate titles are detected, different ones are not
  *   - comiclayout.js  : panel geometry and text wrapping for comic pages
  *   - triage.js       : contact-sheet layout and parsing of the AI's pick
+ *   - imageedit.js    : brushed areas in words, repairs from QC findings, edit vs re-render
+ *   - comfy.js        : image edits keep the source picture's size
+ *   - navorder.js     : the saved sidebar order, with new tabs slotted in
  */
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -20,9 +23,11 @@ import assert from 'node:assert/strict';
 
 const root = new URL('../src/renderer/', import.meta.url);
 
-/** Load renderer modules (in order) into one fresh sandbox and return its `window`. */
+/** Load renderer modules (in order) into one fresh sandbox and return its `window`.
+ *  An optional first argument object adds extra globals (e.g. a stub `document`). */
 function load(...files) {
-  const sandbox = { console, setTimeout, clearTimeout, structuredClone, URL, TextEncoder, TextDecoder };
+  const extra = typeof files[0] === 'object' ? files.shift() : {};
+  const sandbox = { console, setTimeout, clearTimeout, structuredClone, URL, TextEncoder, TextDecoder, atob, btoa, ...extra };
   sandbox.window = sandbox;
   sandbox.window.ala = {};          // the preload bridge; unused by the pure functions tested here
   vm.createContext(sandbox);
@@ -114,6 +119,75 @@ console.log('triage.js');
     assert.equal(r.best, 1);
     assert.equal(JSON.stringify(r.keep), '[1]');
     assert.equal(r.tiles[1].verdict, 'clean');
+  });
+}
+
+console.log('imageedit.js');
+{
+  const w = load('state.js', 'comfy.js', 'imageedit.js');
+  const E = w.ImageEdit;
+  test('a brushed box becomes words in the instruction', () => {
+    assert.equal(E.locationPhrase({ x: 0, y: 0, w: 100, h: 100 }, 900, 900), 'top-left area of the picture');
+    assert.equal(E.locationPhrase({ x: 400, y: 400, w: 100, h: 100 }, 900, 900), 'centre of the picture');
+    assert.equal(E.locationPhrase({ x: 0, y: 0, w: 900, h: 800 }, 900, 900), 'most of the picture');
+    assert.equal(E.regionInstruction('Make the lantern glow blue.', { x: 800, y: 0, w: 90, h: 90 }, 900, 900),
+      'in the top-right area of the picture: make the lantern glow blue');
+  });
+  test('a repair is built from the QC findings', () => {
+    const card = { qc: { detail: [{ what: 'Fused fingers', where: 'left hand' }], fix: 'Separate the fingers.' } };
+    const t = E.fixInstruction('auto', card);
+    assert.ok(t.startsWith('Fix these flaws: Fused fingers (left hand)') && /separate the fingers/.test(t), t);
+    assert.equal(E.fixInstruction('auto', { qc: {} }), '');
+    assert.ok(E.fixPrompt('fix the hands').startsWith('Repair <image1>.'));
+  });
+  test('local damage is edited, a broken body is re-rendered', () => {
+    const route = (what, gates = []) => E.fixRoute({ qc: { score: 4, detail: [{ what, where: '' }], gates: { failed: gates } } }).mode;
+    assert.equal(route('Fused fingers on the raised hand'), 'edit');
+    assert.equal(route('Left arm merges into the torso with no elbow'), 'rerender');
+    assert.equal(route('Smeared lettering on the sign'), 'edit');
+    assert.equal(route('Blurry background', ['limbs', 'face']), 'rerender');
+  });
+  test('the size warning only appears when the sizes differ', () => {
+    assert.equal(E.sizeWarning({ w: 1024, h: 1024 }, { width: 1024, height: 1024 }), null);
+    assert.ok(/512×768/.test(E.sizeWarning({ w: 512, h: 768 }, { width: 1024, height: 1024 })));
+  });
+}
+
+console.log('comfy.js (edit size)');
+{
+  const C = load('state.js', 'comfy.js').ComfyUI;
+  test('the Qwen edit canvas follows the source aspect', () => {
+    assert.equal(JSON.stringify(C.qwenEditCanvas({ w: 512, h: 768 }, 1024)), '{"width":832,"height":1248}');
+    assert.equal(JSON.stringify(C.qwenEditCanvas({ w: 1024, h: 1024 }, 1024)), '{"width":1024,"height":1024}');
+  });
+  test('an edit samples on the encoder latent and is scaled back to the source size', () => {
+    const nodes = {
+      enc: { classType: 'TextEncodeQwenImage21', inputs: { resolution: 1024, 'images.image_1': ['ref', 0] } },
+      ref: { classType: 'LoadImage', inputs: { image: 'a.png' } },
+      lat: { classType: 'EmptyLatentImage', inputs: { width: 1024, height: 1024, batch_size: 1 } },
+      ks: { classType: 'KSampler', inputs: { latent_image: ['lat', 0], positive: ['enc', 0], seed: 1 } },
+      dec: { classType: 'VAEDecode', inputs: { samples: ['ks', 0] } },
+      save: { classType: 'SaveImage', inputs: { images: ['dec', 0] } },
+    };
+    const m = C.matchEditSize(nodes, { w: 512, h: 768 });
+    assert.ok(m.ok && m.scaled, JSON.stringify(m));
+    assert.equal(JSON.stringify(nodes.ks.inputs.latent_image), '["enc",2]');
+    const scale = nodes[nodes.save.inputs.images[0]];
+    assert.equal(scale.classType, 'ImageScale');
+    assert.equal(`${scale.inputs.width}x${scale.inputs.height}`, '512x768');
+  });
+}
+
+console.log('navorder.js');
+{
+  const doc = { getElementById: () => null, querySelectorAll: () => [] };
+  const w = load({ document: doc, localStorage: { getItem: () => null, setItem() {}, removeItem() {} } }, 'navorder.js');
+  test('a saved order keeps new tabs next to their neighbour', () => {
+    const shipped = ['dashboard', 'review', 'imageedit', 'drafts', 'settings'];
+    assert.equal(w.NavOrder.merge(shipped, ['settings', 'drafts', 'review', 'dashboard']).join(),
+      'settings,drafts,review,imageedit,dashboard');
+    assert.equal(w.NavOrder.merge(shipped, ['gone', 'review', 'review']).join(), 'dashboard,review,imageedit,drafts,settings');
+    assert.equal(w.NavOrder.merge(shipped, null).join(), shipped.join());
   });
 }
 

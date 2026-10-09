@@ -73,6 +73,17 @@
       if (u8.length > 24 && u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4E && u8[3] === 0x47) {
         return { w: rd32(16), h: rd32(20) };
       }
+      // WebP (a pasted or dropped edit source can be one): RIFF....WEBP + VP8 / VP8L / VP8X.
+      if (u8.length >= 30 && String.fromCharCode(...u8.slice(0, 4)) === 'RIFF' && String.fromCharCode(...u8.slice(8, 12)) === 'WEBP') {
+        const kind = String.fromCharCode(...u8.slice(12, 16));
+        const le16 = (o) => u8[o] | (u8[o + 1] << 8);
+        const le24 = (o) => u8[o] | (u8[o + 1] << 8) | (u8[o + 2] << 16);
+        if (kind === 'VP8X') return { w: 1 + le24(24), h: 1 + le24(27) };
+        if (kind === 'VP8 ') return { w: le16(26) & 0x3FFF, h: le16(28) & 0x3FFF };
+        if (kind === 'VP8L') {
+          return { w: 1 + (((u8[22] & 0x3F) << 8) | u8[21]), h: 1 + (((u8[24] & 0x0F) << 10) | (u8[23] << 2) | ((u8[22] & 0xC0) >> 6)) };
+        }
+      }
     } catch { }
     return { w: 0, h: 0 };
   }
@@ -540,6 +551,78 @@
     return { ok: true, targetId, inserted, skipped, limit: capped };
   }
 
+  // Python's round() is half-to-even; the server's sizes must be matched exactly.
+  const pyRound = (x) => { const f = Math.floor(x); const d = x - f; return d > 0.5 ? f + 1 : d < 0.5 ? f : (f % 2 === 0 ? f : f + 1); };
+
+  /**
+   * The canvas TextEncodeQwenImage21 makes from its first picture (comfy_extras/nodes_qwen.py):
+   * about `resolution`² pixels in the picture's own aspect, each side a multiple of 32; with
+   * resolution 0 the picture's own size rounded to 32. Null when it cannot be worked out.
+   */
+  function qwenEditCanvas(src, resolution) {
+    if (!src || !(src.w > 0) || !(src.h > 0)) return null;
+    const res = Number(resolution);
+    if (!Number.isFinite(res) || res < 0) return null;
+    let w, h;
+    if (res > 0) {
+      const ratio = src.w / src.h;
+      w = pyRound(Math.sqrt(res * res * ratio) / 32) * 32;
+      h = pyRound(Math.sqrt(res * res / ratio) / 32) * 32;
+    } else {
+      w = pyRound(src.w / 32) * 32; h = pyRound(src.h / 32) * 32;
+    }
+    return { width: Math.max(32, w), height: Math.max(32, h) };
+  }
+
+  /**
+   * Image edits come back at the SOURCE picture's size. Otherwise an edit would render on the
+   * workflow's own empty latent (1024×1024 on the Qwen graph), so a 512×768 picture would come
+   * back square and re-framed. On a copy of the graph:
+   *   1. every sampler that started from an empty latent (or a size switch) samples on the Qwen
+   *      encoder's own `latent` output instead — the canvas it builds from <image1>, which is
+   *      exactly what ComfyUI's image_qwen_image_2_1_image_edit template does with custom_size
+   *      off. Same aspect, ~1 MP, so the model still renders at its native pixel budget;
+   *   2. one ImageScale (lanczos, centre crop for the few pixels of rounding to 32) goes in
+   *      front of every save node and brings the result to the source's exact width × height.
+   *      Skipped when the canvas already equals it.
+   * `size` is the source's { w, h } (null/unknown → step 2 is skipped; the aspect still holds).
+   * Returns { ok, rewired: [samplerIds], canvas, scaled: bool, reason? }.
+   */
+  function matchEditSize(nodes, size) {
+    const found = qwenReferenceTarget(nodes);
+    if (!found) return { ok: false, rewired: [], scaled: false, reason: 'the workflow has no Qwen reference encoder' };
+    const [encId, enc] = found;
+    if (!isWire(enc.inputs['images.image_1'])) return { ok: false, rewired: [], scaled: false, reason: 'no picture on the encoder\'s image_1' };
+    const rewired = [];
+    for (const [id, n] of Object.entries(nodes)) {
+      if (!n || !SAMPLER_RE.test(n.classType || '') || !n.inputs || !isWire(n.inputs.latent_image)) continue;
+      const from = nodes[n.inputs.latent_image[0]];
+      // Only a sampler that STARTS a picture; a hires/refine pass downstream keeps its input.
+      if (!from || !/^Empty.*Latent|Switch/i.test(from.classType || '')) continue;
+      n.inputs.latent_image = [encId, 2];
+      rewired.push(id);
+    }
+    const canvas = qwenEditCanvas(size, enc.inputs.resolution ?? 1024);
+    const w = Math.round(Number(size && size.w)), h = Math.round(Number(size && size.h));
+    let scaled = false;
+    if (w >= 16 && h >= 16 && w <= 16384 && h <= 16384 && !(canvas && canvas.width === w && canvas.height === h)) {
+      const made = new Map();
+      for (const n of Object.values(nodes)) {
+        if (!n || !/^Save/i.test(n.classType || '') || !n.inputs || !isWire(n.inputs.images)) continue;
+        const key = n.inputs.images.join(':');
+        if (!made.has(key)) {
+          let sid = 'ala-match-size';
+          while (nodes[sid]) sid += '-x';
+          nodes[sid] = { classType: 'ImageScale', inputs: { image: n.inputs.images, upscale_method: 'lanczos', width: w, height: h, crop: 'center' } };
+          made.set(key, sid);
+        }
+        n.inputs.images = [made.get(key), 0];
+        scaled = true;
+      }
+    }
+    return { ok: rewired.length > 0, rewired, canvas, scaled, ...(rewired.length ? {} : { reason: 'no sampler starts from an empty latent' }) };
+  }
+
   class ComfyDriver {
     constructor(settings) { this.settings = settings || {}; }
 
@@ -671,7 +754,7 @@
     }
 
     /** Generate images from a prompt through the configured image workflow. */
-    async generate(promptText, { count = 0, references = [], shouldStop = null } = {}, log = () => {}) {
+    async generate(promptText, { count = 0, references = [], shouldStop = null, matchSource = false } = {}, log = () => {}) {
       const cfg = this.cfg;
       await this.ensureServer({ log });
 
@@ -691,6 +774,18 @@
       const base = JSON.parse(JSON.stringify(wf.nodes));
       base[target.id].inputs[target.field] = String(promptText);
       const referenceResult = await this.stageReferenceImages(base, references, log);
+      // An image edit keeps the source picture's size and framing (see matchEditSize).
+      if (matchSource && referenceResult && referenceResult.attached && referenceResult.attached.length) {
+        const first = (Array.isArray(references) ? references : [])[0] || {};
+        const src = sniffSize(first.base64, String(first.mime || '').toLowerCase());
+        const m = matchEditSize(base, src.w > 0 && src.h > 0 ? src : null);
+        if (m.ok) {
+          log(`Edit keeps the source size: ${src.w ? `${src.w}×${src.h}` : 'unknown size'}`
+            + (m.canvas ? ` (rendered on a ${m.canvas.width}×${m.canvas.height} canvas from <image1>${m.scaled ? ', then resized to match' : ''})` : '') + '.');
+        } else {
+          log(`Could not match the edit to the source size (${m.reason}) — it renders at the workflow's own size${m.scaled ? ', resized to the source' : ''}.`, 'warn');
+        }
+      }
       if (slots.negative && typeof base[slots.negative].inputs.text !== 'string') {
         log('negative prompt slot is not plain text — leaving it alone', 'warn');
       }
@@ -985,6 +1080,6 @@ Rules:
     normalizeWorkflow, detectPromptSlots, detectSeedSlot, detectI2vInput, detectDurationSlot, extractJson, writeVideoPrompt,
     expandSubgraphs, promptFieldOf, widgetInputs, resolvePromptTarget, qwenReferenceTarget,
     clearQwenReferences, injectQwenReferences, referenceLimit, MAX_REFERENCE_IMAGES, ComfyDriver,
-    sniffSize, engineDown,
+    sniffSize, engineDown, matchEditSize, qwenEditCanvas,
   };
 })();

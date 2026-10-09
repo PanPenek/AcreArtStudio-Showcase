@@ -70,7 +70,7 @@
     const entries = (window.Origins && window.Origins.data && window.Origins.data.entries) || [];
     const devs = (window.Insights && window.Insights.perf && window.Insights.perf.deviations) || [];
     const lib = (window.State && State.library) || [];
-    const automatic = new Set(['ideation', 'evolved', 'explore', 'wild', 'continuation', 'teaser', 'overseer']);
+    const automatic = new Set(['ideation', 'evolved', 'explore', 'wild', 'continuation', 'teaser', 'overseer', 'edit']);
     const automaticIds = new Set([...entries, ...devs, ...lib]
       .filter((r) => automatic.has(r.promptSource))
       .map((r) => String(r.deviationId || (r.da && r.da.deviationId) || '')).filter(Boolean));
