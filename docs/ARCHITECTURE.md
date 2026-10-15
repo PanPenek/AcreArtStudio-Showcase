@@ -49,19 +49,19 @@ opens the file itself, so the code and this document say the same thing.
 
 ## Main process: privileged services (`src/main/`)
 
-### `src/main/main.js` <sub>(769 lines)</sub>
+### `src/main/main.js` <sub>(842 lines)</sub>
 
 **Electron main process, the app's privileged service layer.**
 
 Owns everything the browser sandbox is not allowed to touch: the window, the JSON store on disk, the LLM bridge, file I/O for the image library, the ComfyUI HTTP bridge, OS notifications and the custom `ala://` media protocol (which serves library images and videos to the UI, including byte-range requests so video seeking works). The renderer asks for all of this over IPC (see preload.js); every handler is registered in one place below so the whole API surface is readable top to bottom.
 
-### `src/main/preload.js` <sub>(146 lines)</sub>
+### `src/main/preload.js` <sub>(149 lines)</sub>
 
 **The only bridge between the UI and the main process.**
 
 Runs with contextIsolation on and exposes a small, explicit API as `window.ala` (settings, library, LLM calls, files, ComfyUI, research...). The renderer never gets Node.js or `ipcRenderer` directly, so a bug in a web page shown inside the app cannot reach the file system.
 
-### `src/main/store.js` <sub>(601 lines)</sub>
+### `src/main/store.js` <sub>(652 lines)</sub>
 
 **JSON persistence for settings, the job queue, the image library and everything the app learns.**
 
@@ -76,7 +76,7 @@ project folder. Three rules keep that data safe:
 The DEFAULTS object at the top is also the reference for every setting.
 ```
 
-### `src/main/llm.js` <sub>(643 lines)</sub>
+### `src/main/llm.js` <sub>(847 lines)</sub>
 
 **Chat + vision calls against any number of AI providers.**
 
@@ -182,13 +182,13 @@ Settings arrive over IPC only after the page has drawn, so a mirror in localStor
 
 Hold a tab for one second and it lifts; drag it and the other tabs slide out of its way; let go and it settles into the gap (Esc puts it back). The order is saved as `settings.ui.tabOrder` and mirrored in localStorage so it is on screen before the first paint, like the theme. A tab added by an update lands after its shipped neighbour, and Ctrl+number shortcuts stay with the tab name.
 
-### `src/renderer/app.js` <sub>(6,409 lines)</sub>
+### `src/renderer/app.js` <sub>(6,759 lines)</sub>
 
 **UI wiring. Builds and updates every tab (Dashboard, Review, Drafts, Statistics, Settings...), connects buttons to the engines in the other modules and keeps the screen in sync with the store.**
 
 The heavy lifting lives elsewhere (pipeline.js, overseer.js, promptlab.js...); this file turns their state into DOM. Large grids (Review) are reconciled card by card instead of rebuilt, so typing in a card never loses the caret.
 
-### `src/renderer/pipeline.js` <sub>(3,152 lines)</sub>
+### `src/renderer/pipeline.js` <sub>(3,319 lines)</sub>
 
 **The automation orchestrator, the heart of the app.**
 
@@ -230,7 +230,7 @@ Two panels: the engines themselves (URL + key, or a CLI command) and the routing
 
 Perchance has no API, so the driver operates the page like a person would: fill the description, set the style/shape/count dropdowns, press Generate, wait for the result frames, and extract the finished images. Frame access goes through the main process (webFrameMain.executeJavaScript) because the generator runs in cross-origin iframes. Every page call has a hard timeout so a hung page can never freeze the pipeline.
 
-### `src/renderer/comfy.js` <sub>(990 lines)</sub>
+### `src/renderer/comfy.js` <sub>(1,271 lines)</sub>
 
 **Local image and video generation through a ComfyUI server.**
 
@@ -242,7 +242,7 @@ Image edits come back at the source picture's size: `matchEditSize` rewires the 
 
 ## Writing prompts and titles
 
-### `src/renderer/promptlab.js` <sub>(808 lines)</sub>
+### `src/renderer/promptlab.js` <sub>(813 lines)</sub>
 
 **Write new image prompts from an example prompt, a reference image, web research or a short story.**
 
@@ -260,7 +260,7 @@ Reference images are read by a vision model into a structured brief first, so a
 picture nobody has words for still becomes source material.
 ```
 
-### `src/renderer/promptstyle.js` <sub>(197 lines)</sub>
+### `src/renderer/promptstyle.js` <sub>(336 lines)</sub>
 
 **The artist's own prompt "voice", measured from their prompts.**
 
@@ -292,7 +292,7 @@ the same scene in a different room. Four counterweights:
      exploration can win on merit.
 ```
 
-### `src/renderer/titles.js` <sub>(728 lines)</sub>
+### `src/renderer/titles.js` <sub>(751 lines)</sub>
 
 **Memory and imagination for artwork titles.**
 
@@ -311,7 +311,7 @@ It also learns the artist's own title style from the titles they rename by hand.
 
 ## The Overseer assistant
 
-### `src/renderer/overseer.js` <sub>(1,876 lines)</sub>
+### `src/renderer/overseer.js` <sub>(2,853 lines)</sub>
 
 **The Overseer, a chat assistant that operates the app with tools.**
 
@@ -329,9 +329,12 @@ far more reliable than one asked to plan a whole array of calls.
 
 Two modes: helper (you ask, it acts, it stops) and agent (it wakes on a schedule,
 reviews what happened since last time and works toward a standing brief).
+Tools include make_comic / revise_comic / comic_status and merge_video. When the
+model returns its reasoning, it is kept with the step and shown collapsed in the
+chat; it is never sent back to the model.
 ```
 
-### `src/renderer/overseerui.js` <sub>(563 lines)</sub>
+### `src/renderer/overseerui.js` <sub>(581 lines)</sub>
 
 **The Overseer tab: transcript, composer (with image attachments), and the switches that decide what the assistant may do on its own.**
 
@@ -355,7 +358,7 @@ Design rule: every tool call is shown, collapsed but always visible. An agent yo
 
 ## Learning loop
 
-### `src/renderer/insights.js` <sub>(850 lines)</sub>
+### `src/renderer/insights.js` <sub>(1,099 lines)</sub>
 
 **Measurement and learning.**
 
@@ -373,7 +376,11 @@ Before anything is published, the artist's own approve/reject decisions and the
 quality scores act as the learning signal.
 ```
 
-### `src/renderer/teach.js` <sub>(335 lines)</sub>
+### `src/renderer/models.js` <sub>(62 lines)</sub>
+
+**Which image model made a picture, and which models the app learns from.** Every new card records its model; older cards are inferred from their size. Learning reads the target model's own posts first and blends the others in as a fading prior, so prompts written for one model are not steered by what worked on another.
+
+### `src/renderer/teach.js` <sub>(427 lines)</sub>
 
 **The hand-written half of the playbook.**
 
@@ -395,7 +402,7 @@ only returns them. Nothing is saved without the artist accepting it.
 
 Recorded at upload time from the card as it was, so deleting the card later does not lose the answer. Every entry states HOW it was matched: `upload` and `manual` are facts, `title` is an exact normalised match, `probable` is a fuzzy match that is shown clearly marked and never fed back into the learning loop.
 
-### `src/renderer/originsui.js` <sub>(268 lines)</sub>
+### `src/renderer/originsui.js` <sub>(269 lines)</sub>
 
 **The prompt archive on screen. A searchable list of everything published, and a detail view per artwork: the prompt that made it, how certain the match is (always shown in words), and the next steps: copy it, run it again, or write a continuation.**
 
@@ -403,33 +410,35 @@ Recorded at upload time from the card as it was, so deleting the card later does
 
 ## Comics, continuations, review tools
 
-### `src/renderer/comics.js` <sub>(720 lines)</sub>
+### `src/renderer/comics.js` <sub>(1,475 lines)</sub>
 
-**The comic page / illustrated story builder.**
+**The comic engine: one button from a premise to a lettered page.**
 
 ```text
-The hard part is CONSISTENCY: an image generator has no memory between panels,
-so panel two draws a different character unless something prevents it. Two
-mechanisms, chosen per project:
-  bible:  a character model sheet is written once and repeated word for word at
-          the top of every panel prompt (cheap, text-only, most of the win);
-  vision: additionally, each finished panel is read back by a vision model and
-          what it ACTUALLY shows is carried into the next panel's prompt.
-Panels are project assets, not artworks: only the composed page becomes a card
-in the library.
+A comic is planned by a writer model (storyboard: cast, places, panels with shot,
+action and lines), then drawn on the normal queue through ComfyUI:
+  cast sheets:  one clean full-body reference per character, drawn once (from his
+                pictures when he gave some) and attached to every panel, so the
+                character stays the same person from panel to panel;
+  plates:       an empty background per place used in two or more panels;
+  panels:       several takes each; a vision model scores the takes on a contact
+                sheet (identity, beat, clean render, place) and keeps the best;
+  lettering:    the captions and lines are rewritten from what was actually drawn,
+                and balloons are placed away from faces.
+Panels are project assets, not artworks: only the composed page becomes a card.
 ```
 
-### `src/renderer/comiclayout.js` <sub>(337 lines)</sub>
+### `src/renderer/comiclayout.js` <sub>(745 lines)</sub>
 
 **Page geometry and canvas drawing for comics.**
 
 Pure functions, no network, no models, so it is the half of the comic builder that can be tested offline. Layouts are lists of rectangles in 0..1 space, so the same template renders as a thumbnail in the editor and at full size for export. Includes word wrapping, font fitting, captions and speech bubbles.
 
-### `src/renderer/comicsui.js` <sub>(765 lines)</sub>
+### `src/renderer/comicsui.js` <sub>(973 lines)</sub>
 
 **The Comics tab.**
 
-The editor is a live preview of the REAL page composer, drawn at whatever scale fits the screen, so what you see is exactly what exports (font fitting and wrapping included). Speech bubbles are dragged directly on that canvas.
+Brief (premise, cast pictures, format, panels, page style) and one Make button; then a live preview of the REAL page composer next to an inspector for the selected panel: takes, reroll, edit in words, and its balloons. Balloons are dragged, resized and their tails aimed directly on the canvas.
 
 ### `src/renderer/continuations.js` <sub>(298 lines)</sub>
 
@@ -459,15 +468,23 @@ One prompt is usually rendered several times; the real decision is "which of the
 Repaints are split so toggling a keeper never re-decodes the images.
 ```
 
-### `src/renderer/imageedit.js` <sub>(722 lines)</sub>
+### `src/renderer/imageedit.js` <sub>(774 lines)</sub>
 
 **The engine behind the Image Edit tab and the 🩹 Fix button.**
 
-Qwen-Image 2.1 both generates and edits: the picture goes in as `<image1>` and the model re-renders the whole frame from it plus an instruction. A brushed area only becomes words ("in the top-left area of the picture: …"); nothing is masked or pasted. Every result is a new card. Repairs are routed in code from QC's own findings: local damage (hands, face, detail) gets an edit that keeps the look, while a broken body gets a fresh render on new seeds with a vision-rewritten prompt (same character, outfit and scene, one simple pose). When a vision model is available it describes the corrected picture first, which steers the editor far better than a list of defects. Auto-fix (off by default) repairs a picture that fails QC, up to two tries, always from the original. The edit history is rebuilt from the library and the queue every time, so it survives restarts.
+Qwen-Image 2.1 both generates and edits: the picture goes in as `<image1>` and the model re-renders the whole frame from it plus an instruction. A brushed area only becomes words ("in the top-left area of the picture: …"); nothing is masked or pasted. Every result is a new card. Repairs are routed in code from QC's own findings: local damage (hands, face, detail) gets an edit that keeps the look, while a broken body gets a fresh render on new seeds with a vision-rewritten prompt (same character, outfit and scene, one simple pose). When a vision model is available it describes the corrected picture first, which steers the editor far better than a list of defects. Auto-fix (off by default) repairs a picture that fails QC, up to two tries, always from the original. The edit history is rebuilt from the library and the queue every time, so it survives restarts. Reference pictures ride after the source as `<image2>`, `<image3>`. A character remake ("make her the character from image2") is not sent the reference at all: an attached face gets pasted in as drawn, so a vision model describes the character's design in words and the edit redraws it in the source picture's style.
 
-### `src/renderer/imageeditui.js` <sub>(521 lines)</sub>
+### `src/renderer/imageeditui.js` <sub>(596 lines)</sub>
 
 **The Image Edit tab and the 🩹 Fix menu on cards.** Picture on the left, a history panel of numbered checkpoints on the right (#0 is the original): click one to edit from it, ⟲ Undo, ↻ Redo with a new seed, ✎ Reuse an instruction, ✕ discard and restore. Editing from an older checkpoint starts an indented branch; holding Space shows the checkpoint before.
+
+### `src/renderer/videomerge.js` <sub>(86 lines)</sub>
+
+**Video Merge, the pure part (no DOM, no network).** A merge is two or more pictures on the timeline of ONE clip: picture 1 opens it, every later picture is reached at its own second, or, for the last one, on the very last frame. Checks a timeline, spaces pictures evenly when no time is given, and describes it in words.
+
+### `src/renderer/videomergeui.js` <sub>(552 lines)</sub>
+
+**The Video Merge tab.** Pick pictures (library, file, drop or paste), set the seconds, write the prompt (Auto: a vision model describes every picture and writes the change; Hybrid; Custom) and render through the same ComfyUI video workflow as Convert to video. A finished merge becomes a new card in Review.
 
 ### `src/renderer/teaser.js` <sub>(211 lines)</sub>
 

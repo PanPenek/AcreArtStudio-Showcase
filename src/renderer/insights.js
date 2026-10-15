@@ -75,6 +75,8 @@
     perf: { deviations: [], lastSyncAt: null, username: '' },
     playbook: null,
     syncing: false,
+    snapshots: { items: [], migrated: false },
+    _learnOverride: null,
 
     get cfg() { return (State.settings && State.settings.learn) || {}; },
 
@@ -83,6 +85,11 @@
       this.perf.deviations = this.perf.deviations || [];
       this.playbook = await window.ala.db.getPlaybook();
       this.relink();
+      if (window.ala.db.getSnapshots) {
+        this.snapshots = (await window.ala.db.getSnapshots()) || { items: [] };
+        this.snapshots.items = this.snapshots.items || [];
+        await this.migrateModels().catch((e) => State.addLog(`Model profiles: could not save the old database (${e.message}).`, 'err'));
+      }
     },
 
     persistPerf() { window.ala.db.setPerf(this.perf); State.emit('perf', this.perf); },
@@ -153,6 +160,14 @@
       }
     },
 
+    isReferencePrompt(c) {
+      if (!c) return false;
+      return !!(c.editOf || c.promptSource === 'edit'
+        || (Array.isArray(c.referenceIds) && c.referenceIds.length)
+        || (Array.isArray(c.attachedReferenceIds) && c.attachedReferenceIds.length)
+        || /<image\d+>/i.test(String(c.prompt || '')));
+    },
+
     /** Join deviations back to the local cards that made them. */
     relink() {
       const byDevId = new Map();
@@ -166,6 +181,7 @@
       }
       let linked = 0;
       for (const d of this.perf.deviations) {
+        d.model = 'else'; d.promptStyle = null; d.promptArm = null; d.usedReference = false;
         const id = String(d.deviationId ?? '');
         const exact = byDevId.has(id);
         const title = norm(d.title);
@@ -188,6 +204,10 @@
         d.qcScore = (card.qc && card.qc.score) ?? d.qcScore ?? null;
         d.upscaled = !!card.upscaled;
         d.promptSource = card.promptSource || d.promptSource || null;
+        d.model = window.Models ? Models.ofCard(card) : 'else';
+        d.promptStyle = card.promptStyle || null;
+        d.promptArm = card.promptArm || null;
+        d.usedReference = this.isReferencePrompt(card);
         if (!d.tags || !d.tags.length) d.tags = (card.metadata && card.metadata.tags) || [];
       }
       return linked;
@@ -297,13 +317,15 @@
     },
 
     /** Everything measured, with `m.vsPeers` attached, best first by that. */
-    ranked({ eligibleOnly = false } = {}) {
+    ranked({ eligibleOnly = false, learnOnly = false } = {}) {
       const rows = this.measured();
       const peer = this.peerScores(rows);
       const minAge = this.minExemplarAgeDays();
+      const L = learnOnly ? this.learning() : null;
       return rows
         .map(({ d, m }) => ({ d, m: { ...m, vsPeers: (peer.get(String(d.deviationId)) || {}).vsPeers ?? null } }))
-        .filter(({ d, m }) => m.vsPeers != null && (!eligibleOnly || trueAgeDays(d) >= minAge))
+        .filter(({ d, m }) => m.vsPeers != null && (!eligibleOnly || trueAgeDays(d) >= minAge)
+          && (!L || this.learnsFrom(d, L)))
         .sort((x, y) => y.m.vsPeers - x.m.vsPeers);
     },
 
@@ -375,38 +397,87 @@
     /** The full analysis. */
     breakdowns() {
       const min = this.cfg.minSamples || 3;
-      const measured = this.ranked();
+      const L = this.learning();
+      const measured = this.ranked({ learnOnly: true });
       const daRows = measured.map(({ d, m }) => ({
         d, value: m.vsPeers, label: d.title,
         theme: d.theme || '', tags: d.tags || [], prompt: d.prompt || '',
         title: d.title || '', qc: d.qcScore, at: d.publishedAt, mature: d.isMature,
+        model: d.model || 'else', promptStyle: d.promptStyle || null,
       }));
 
       const useDa = daRows.length >= min * 2;
-      const rows = useDa ? daRows : this._localRows();
+      const rows = useDa ? daRows : this._localRows(L);
       const source = daRows.length >= min * 2 ? 'deviantart' : (rows.length ? 'local' : 'none');
+
+      const blendOn = !!(L.target && L.sel && L.sel.has(L.target));
+      const own = blendOn ? rows.filter((r) => r.model === L.target) : rows;
+      const prior = blendOn ? rows.filter((r) => r.model !== L.target) : [];
+      const audience = (keysOf, opts = {}) => (prior.length
+        ? this._blend(own, prior, keysOf, opts, L.k)
+        : this._lift(rows, keysOf, opts));
+      const speaks = (r) => (L.target === 'qwen-image-2.1' ? r.model === L.target && r.promptStyle === 'prose' : r.model === L.target);
+      const styleRows = L.target ? rows.filter(speaks) : rows;
 
       return {
         source,
         sampleSize: rows.length,
         daCount: daRows.length,
         metricBasis: measured[0]?.m.observed || [],
-        themes: this._lift(rows, (r) => [r.theme && r.theme.trim().toLowerCase()]),
-        tags: this._lift(rows, (r) => r.tags),
-        promptTraits: this._lift(rows, (r) => this._features(r.prompt), { minSamples: Math.max(min, 3), limit: 14 }),
-        titleTraits: this._lift(rows, (r) => titleTraits(r.title), { limit: 8 }),
-        timing: useDa ? this._lift(rows, (r) => timingKeys(r.at), { limit: 8 }) : [],
-        qcBands: this._lift(rows, (r) => (r.qc == null ? [] : [qcBand(r.qc)]), { minSamples: 2, limit: 4 }),
+        mix: {
+          target: L.target, blend: !!prior.length, ownN: own.length, priorN: prior.length, k: L.k,
+          models: L.sel ? [...L.sel] : [], since: L.since || null,
+          promptRows: styleRows.length,
+          perModel: rows.reduce((acc, r) => { acc[r.model] = (acc[r.model] || 0) + 1; return acc; }, {}),
+        },
+        themes: audience((r) => [r.theme && r.theme.trim().toLowerCase()]),
+        tags: audience((r) => r.tags),
+        promptTraits: this._lift(styleRows, (r) => this._features(r.prompt), { minSamples: Math.max(min, 3), limit: 14 }),
+        titleTraits: audience((r) => titleTraits(r.title), { limit: 8 }),
+        timing: useDa ? audience((r) => timingKeys(r.at), { limit: 8 }) : [],
+        qcBands: this._lift(blendOn ? own : rows, (r) => (r.qc == null ? [] : [qcBand(r.qc)]), { minSamples: 2, limit: 4 }),
       };
     },
 
+    _blend(own, prior, keysOf, { minSamples = null, limit = 12 } = {}, k = 20) {
+      const min = minSamples ?? (this.cfg.minSamples || 3);
+      const all = { minSamples: 1, limit: Infinity };
+      const O = new Map(this._lift(own, keysOf, all).map((x) => [x.key, x]));
+      const P = new Map(this._lift(prior, keysOf, { minSamples: min, limit: Infinity }).map((x) => [x.key, x]));
+      const out = [];
+      for (const key of new Set([...O.keys(), ...P.keys()])) {
+        const o = O.get(key);
+        const p = P.get(key);
+        const nO = o ? o.n : 0;
+        if (!p && nO < min) continue;
+        const share = p ? nO / (nO + Math.max(0, k)) : 1;
+        const lift = p ? share * (o ? o.lift : 1) + (1 - share) * p.lift : o.lift;
+        out.push({
+          key,
+          n: nO + (p ? p.n : 0),
+          median: o ? o.median : p.median,
+          rawLift: o ? o.rawLift : p.rawLift,
+          lift: round2(lift),
+          best: (o && o.best) || (p && p.best) || '',
+          own: o ? { n: o.n, lift: o.lift } : { n: 0, lift: null },
+          prior: p ? { n: p.n, lift: p.lift } : null,
+          ownShare: round2(share),
+        });
+      }
+      return out.sort((a, b) => b.lift - a.lift).slice(0, limit);
+    },
+
     /** The day-one signal: the artist's own decisions. */
-    _localRows() {
+    _localRows(L = this.learning()) {
       const YES = new Set(['approved', 'drafted', 'upload_failed']);
       const NO = new Set(['rejected', 'discarded']);
+      const modelOf = (c) => (window.Models ? Models.ofCard(c) : 'else');
       return State.library
         .filter((c) => YES.has(c.status) || NO.has(c.status))
+        .filter((c) => (!L.since || (c.createdAt || 0) >= L.since) && (!L.sel || L.sel.has(modelOf(c))))
         .map((c) => ({
+          model: modelOf(c),
+          promptStyle: c.promptStyle || null,
           d: null,
           value: YES.has(c.status) ? 1 : 0,
           label: (c.metadata && c.metadata.title) || c.fname,
@@ -420,12 +491,13 @@
         }));
     },
 
-    topPerformers(n = 10) { return this.ranked({ eligibleOnly: true }).slice(0, n); },
-    worstPerformers(n = 10) { return this.ranked({ eligibleOnly: true }).slice(-n).reverse(); },
+    topPerformers(n = 10, { learnOnly = false } = {}) { return this.ranked({ eligibleOnly: true, learnOnly }).slice(0, n); },
+    worstPerformers(n = 10, { learnOnly = false } = {}) { return this.ranked({ eligibleOnly: true, learnOnly }).slice(-n).reverse(); },
 
     /** Winners to grow ONE theme's next prompts from, best first. */
     recipesFor({ theme = '', limit = 8 } = {}) {
-      const live = this.ranked({ eligibleOnly: true })
+      if (this.cfg.copyPrompts === false) return [];
+      const live = this.ranked({ eligibleOnly: true, learnOnly: true })
         .filter(({ d, m }) => d.prompt && m.engagement > 0)
         .map(({ d, m }) => recipeOf(d, m));
       const saved = ((this.playbook && this.playbook.recipes) || []).filter((r) => r && r.prompt);
@@ -450,12 +522,12 @@
      * Build the playbook: the statistics, plus an LLM pass that turns them into instructions a
      * prompt writer can actually follow.
      */
-    async buildPlaybook({ useLlm = null, log = () => {} } = {}) {
+    async buildPlaybook({ useLlm = null, log = () => {}, persist = true } = {}) {
       const b = this.breakdowns();
       const wantLlm = useLlm == null ? this.cfg.useLlmLessons !== false : useLlm;
 
-      const top = this.topPerformers(8).filter(({ m }) => m.engagement > 0);
-      const bottom = b.source === 'deviantart' ? this.worstPerformers(6) : [];
+      const top = this.topPerformers(8, { learnOnly: true }).filter(({ m }) => m.engagement > 0);
+      const bottom = b.source === 'deviantart' ? this.worstPerformers(6, { learnOnly: true }) : [];
 
       const playbook = {
         updatedAt: Date.now(),
@@ -470,8 +542,13 @@
         timing: b.timing,
         qcBands: b.qcBands,
         mature: b.mature,
+        models: b.mix ? b.mix.models : [],
+        target: b.mix ? b.mix.target : null,
+        since: b.mix ? b.mix.since : null,
+        mix: b.mix || null,
         exemplars: top.map(({ d, m }) => ({
           deviationId: d.deviationId,
+          model: d.model || 'else',
           title: d.title,
           url: d.url,
           theme: d.theme || '',
@@ -493,8 +570,7 @@
 
       if (b.source === 'none') {
         playbook.summary = 'Nothing measured yet. Publish some deviations and sync, or approve/reject a few cards — either gives the learning loop something to work from.';
-        this.playbook = playbook;
-        this.persistPlaybook();
+        if (persist) { this.playbook = playbook; this.persistPlaybook(); }
         return playbook;
       }
 
@@ -512,7 +588,9 @@
       }
 
       const perTheme = new Map();
-      playbook.recipes = this.ranked({ eligibleOnly: true })
+      const L = this.learning();
+      playbook.recipes = this.cfg.copyPrompts === false ? [] : this.ranked({ eligibleOnly: true, learnOnly: true })
+        .filter(({ d }) => !L.target || d.model === L.target)
         .filter(({ d, m }) => d.prompt && m.engagement > 0)
         .filter(({ d }) => {
           const k = norm(d.theme) || '(none)';
@@ -524,14 +602,14 @@
         .slice(0, 8)
         .map(({ d, m }) => recipeOf(d, m));
 
-      this.playbook = playbook;
-      this.persistPlaybook();
+      if (persist) { this.playbook = playbook; this.persistPlaybook(); }
       return playbook;
     },
 
     async _askLessons(playbook, top, bottom) {
       const fmt = ({ d, m }) => [
         `title: ${d.title}`,
+        window.Models ? `made with: ${Models.label(d.model || 'else')}` : null,
         d.theme ? `theme: ${d.theme}` : null,
         `${m.vsPeers != null ? `${round2(m.vsPeers)}× a typical post of the same age` : `engagement/day: ${round2(m.perDay)}`}${m.views ? ` (${m.views} views, ${m.favs} favs, ${m.comments} comments` : ` (${m.favs} favs, ${m.comments} comments`} over ${Math.round(trueAgeDays(d))} days)`,
         (d.tags || []).length ? `tags: ${(d.tags || []).slice(0, 10).join(', ')}` : null,
@@ -548,10 +626,13 @@
         ? `The numbers below are real DeviantArt engagement, using only shared observed counters: ${(playbook.metricBasis || []).join(', ') || 'legacy basis'}. Each piece is compared with the posts published closest to it in time, so a week-old piece and a year-old piece are judged on the same footing — "2×" means twice what a typical post of that age earned.`
         : 'NOTE: published evidence is insufficient. These are local workflow outcomes, mixing keep/reject actions with automated QC discards. They are not verified human preferences or audience demand. Write the lessons accordingly.';
 
+      const modelNote = window.Models && (playbook.models || []).length > 1
+        ? `\nThese posts were made with different image models (named per post: ${playbook.models.map((x) => Models.label(x)).join(', ')}), each prompted in its own wording. Write lessons about what the AUDIENCE responded to — the subject, the moment, framing, wardrobe, setting, mood, the title — never about prompt wording, tags or quality keywords, which do not carry over between models.\n`
+        : '';
       const prompt = `You analyse performance data for an anime-style AI art account and write down what to repeat.
 
 ${signalNote}
-
+${modelNote}
 MEASURED CORRELATIONS (median-based, sample-gated):
 ${statLines || '(too few samples for reliable correlations)'}
 
@@ -633,8 +714,8 @@ In 2-3 sentences say what about THIS piece most plausibly drove the result — s
     },
 
     /** The block that gets pasted into ideation and metadata prompts. */
-    guidance({ theme = '', maxChars = 1800, mode = 'exploit', axes = null } = {}) {
-      const p = this.playbook;
+    guidance({ theme = '', maxChars = 1800, mode = 'exploit', axes = null, snapshot = null } = {}) {
+      const p = this.activePlaybook(snapshot);
       const V = window.Variety;
       const own = window.Teach ? Teach.block({ hard: mode === 'wild' }) : '';
       const lines = [];
@@ -661,9 +742,12 @@ In 2-3 sentences say what about THIS piece most plausibly drove the result — s
         return own;
       }
 
+      const from = p.snapshot ? ` (saved database "${p.snapshot.name}")` : '';
+      const made = window.Models && (p.models || []).length
+        ? `, made with ${p.models.map((x) => Models.label(x)).join(' + ')}` : '';
       const head = p.source === 'deviantart'
-        ? `WHAT PERFORMS BEST for this artist — measured on ${p.daCount} published deviation(s):`
-        : `LOCAL WORKFLOW OUTCOMES — ${p.sampleSize} keep/reject records, including automated QC discards. Not verified human preferences or audience demand:`;
+        ? `WHAT PERFORMS BEST for this artist${from} — measured on ${p.daCount} published deviation(s)${made}. This is what the AUDIENCE responds to; write the prompt itself the way the rules below say:`
+        : `LOCAL WORKFLOW OUTCOMES${from} — ${p.sampleSize} keep/reject records, including automated QC discards. Not verified human preferences or audience demand:`;
       lines.push(head);
 
       const boost = (window.Teach ? Teach.manual().boost : { themes: {}, tags: {} }) || { themes: {}, tags: {} };
@@ -708,7 +792,7 @@ In 2-3 sentences say what about THIS piece most plausibly drove the result — s
         }
       }
 
-      if (mode !== 'explore') {
+      if (mode !== 'explore' && this.cfg.copyPrompts !== false) {
         const pool = (p.exemplars || []).filter((e) => e.prompt);
         const themed = theme ? pool.filter((e) => norm(e.theme) === norm(theme)) : [];
         const ex = V
@@ -719,7 +803,7 @@ In 2-3 sentences say what about THIS piece most plausibly drove the result — s
         }
       }
 
-      if (mode === 'explore') {
+      if (mode === 'explore' && this.cfg.copyPrompts !== false) {
         lines.push('- This is an EXPLORE round: the winning prompts have been deliberately withheld. Apply the lessons above as principles and build genuinely new scenes from them.');
       }
 
@@ -731,7 +815,7 @@ In 2-3 sentences say what about THIS piece most plausibly drove the result — s
 
     /** Tags with measured lift, for the metadata writer to prioritise. */
     preferredTags(n = 8) {
-      const p = this.playbook;
+      const p = this.activePlaybook();
       if (!p || !this.cfg.enabled) return [];
       const boost = (window.Teach ? Teach.manual().boost.tags : {}) || {};
       return (p.tags || [])
@@ -744,7 +828,7 @@ In 2-3 sentences say what about THIS piece most plausibly drove the result — s
 
     /** Relative weight per configured theme, for auto mode's rotation. */
     themeWeights(themes) {
-      const p = this.playbook;
+      const p = this.activePlaybook();
       const flat = new Map(themes.map((t) => [norm(t.theme), 1]));
       if (!p || !this.cfg.enabled || !(p.themes || []).length) return flat;
       for (const row of p.themes) {
@@ -761,6 +845,180 @@ In 2-3 sentences say what about THIS piece most plausibly drove the result — s
         for (const [k, v] of flat) flat.set(k, v * (novelty.get(k) || 1));
       }
       return flat;
+    },
+
+    learning() {
+      const o = this._learnOverride;
+      const sel = o && o.models ? new Set(o.models) : (window.Models ? Models.selected() : null);
+      const target = window.Models ? Models.active() : null;
+      const since = Number(o && o.since != null ? o.since : this.cfg.since) || 0;
+      const kRaw = Number(this.cfg.priorStrength);
+      return { sel, target, since, k: Number.isFinite(kRaw) && kRaw >= 0 ? kRaw : 20 };
+    },
+
+    learnsFrom(d, L = this.learning()) {
+      if (L.since && (d.publishedAt || d.firstSeenAt || 0) < L.since) return false;
+      return !L.sel || L.sel.has(d.model || 'else');
+    },
+
+    viewsAt(d, hours = 72) {
+      const t0 = d && d.publishedAt;
+      if (!t0) return null;
+      const at = t0 + hours * 3600000;
+      const pts = [[t0, 0], ...(d.history || [])
+        .filter((h) => Number.isFinite(h.at) && Number.isFinite(h.views)).map((h) => [h.at, h.views])
+        .sort((a, b) => a[0] - b[0])];
+      for (let i = 1; i < pts.length; i++) {
+        const [a, va] = pts[i - 1];
+        const [b, vb] = pts[i];
+        if (a <= at && at <= b) return b - a > 3 * DAY ? null : va + (vb - va) * (at - a) / Math.max(1, b - a);
+      }
+      return null;
+    },
+
+    modelCounts() {
+      const out = {};
+      for (const m of (window.Models ? Models.LIST : [])) out[m.id] = { posts: 0, measured: 0, views72: null, _v: [] };
+      for (const d of this.perf.deviations) {
+        if (d.isDeleted) continue;
+        const row = out[d.model || 'else'] || (out[d.model || 'else'] = { posts: 0, measured: 0, views72: null, _v: [] });
+        row.posts++;
+        const v = this.viewsAt(d, 72);
+        if (v != null) row._v.push(v);
+      }
+      for (const row of Object.values(out)) {
+        row.measured = row._v.length;
+        row.views72 = row._v.length ? Math.round(median(row._v)) : null;
+        delete row._v;
+      }
+      return out;
+    },
+
+    orderTest() {
+      const arms = { action: { made: 0, posts: 0, vs: [], v72: [] }, character: { made: 0, posts: 0, vs: [], v72: [] } };
+      for (const c of State.library || []) if (arms[c.promptArm]) arms[c.promptArm].made++;
+      for (const { d, m } of this.ranked({ eligibleOnly: true })) {
+        const a = arms[d.promptArm];
+        if (!a) continue;
+        a.posts++;
+        a.vs.push(m.vsPeers);
+        const v = this.viewsAt(d, 72);
+        if (v != null) a.v72.push(v);
+      }
+      const sum = (a) => ({
+        made: a.made, posts: a.posts,
+        vsPeers: a.vs.length ? round2(median(a.vs)) : null,
+        views72: a.v72.length ? Math.round(median(a.v72)) : null,
+        measured72: a.v72.length,
+      });
+      return { on: ((State.settings || {}).gen || {}).promptOrderTest !== false, action: sum(arms.action), character: sum(arms.character) };
+    },
+
+    activePlaybook(snapshot = null) {
+      const want = snapshot || this.cfg.activeSnapshot;
+      if (want) {
+        const s = this.snapshotPlaybook(want);
+        if (s) return s;
+      }
+      return this.playbook;
+    },
+
+    findSnapshot(q) {
+      const items = (this.snapshots && this.snapshots.items) || [];
+      const s = String(q || '').trim().toLowerCase();
+      if (!s) return null;
+      return items.find((x) => x.id === q)
+        || items.find((x) => String(x.name).toLowerCase() === s)
+        || items.find((x) => String(x.name).toLowerCase().includes(s))
+        || items.find((x) => s.includes(String(x.name).toLowerCase()))
+        || items.find((x) => (x.models || []).length === 1 && s.includes(String(x.models[0]).toLowerCase()))
+        || null;
+    },
+
+    snapshotPlaybook(q) {
+      const item = this.findSnapshot(q);
+      if (!item || !item.playbook) return null;
+      return {
+        ...item.playbook,
+        manual: (this.playbook && this.playbook.manual) || (window.Teach ? Teach._blank() : null),
+        rotation: (this.playbook && this.playbook.rotation) || { round: 0, seeds: {}, modes: [] },
+        snapshot: { id: item.id, name: item.name },
+      };
+    },
+
+    persistSnapshots() {
+      if (window.ala.db.setSnapshots) window.ala.db.setSnapshots(this.snapshots);
+      State.emit('snapshots', this.snapshots);
+    },
+
+    saveSnapshot(name, { playbook = this.playbook, auto = false, models = null } = {}) {
+      if (!playbook) throw new Error('there is no playbook to save yet');
+      const { manual, rotation, snapshot, ...derived } = playbook;
+      const items = this.snapshots.items || (this.snapshots.items = []);
+      let base = String(name || '').trim() || `Snapshot · ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
+      let n = 2;
+      let unique = base;
+      while (items.some((x) => x.name.toLowerCase() === unique.toLowerCase())) unique = `${base} (${n++})`;
+      const item = {
+        id: U.uid(), name: unique, createdAt: Date.now(), auto: !!auto,
+        models: models || (derived.models && derived.models.length ? derived.models : (window.Models ? [...Models.selected()] : [])),
+        posts: derived.daCount || derived.sampleSize || 0,
+        since: derived.since || null,
+        playbook: JSON.parse(JSON.stringify(derived)),
+      };
+      items.unshift(item);
+      this.persistSnapshots();
+      return item;
+    },
+
+    async useSnapshot(id = null) {
+      State.settings = await window.ala.settings.patch({ learn: { activeSnapshot: id || null } });
+      State.emit('playbook', this.playbook);
+    },
+
+    async deleteSnapshot(id) {
+      this.snapshots.items = (this.snapshots.items || []).filter((x) => x.id !== id);
+      this.persistSnapshots();
+      if (this.cfg.activeSnapshot === id) await this.useSnapshot(null);
+    },
+
+    async clear(name = '') {
+      const saved = this.playbook && this.playbook.source !== 'none'
+        ? this.saveSnapshot(name || `Before clear · ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`)
+        : null;
+      State.settings = await window.ala.settings.patch({ learn: { since: Date.now(), activeSnapshot: null } });
+      const p = await this.buildPlaybook({ useLlm: false });
+      p.lessons = [];
+      this.playbook = p;
+      this.persistPlaybook();
+      return { saved, playbook: p };
+    },
+
+    async learnFromAllHistory() {
+      State.settings = await window.ala.settings.patch({ learn: { since: null } });
+      return this.buildPlaybook({ useLlm: false });
+    },
+
+    async migrateModels() {
+      if (this.snapshots.migrated) return;
+      const old = this.playbook;
+      if (old && old.source && old.source !== 'none') {
+        this.saveSnapshot('Old database (before model profiles)', { playbook: old, auto: true, models: ['qwen-image-2.1', 'perchance', 'else'] });
+        this._learnOverride = { models: ['perchance'], since: 0 };
+        try {
+          const pch = await this.buildPlaybook({ useLlm: false, persist: false });
+          if (pch && pch.source !== 'none') {
+            pch.lessons = (old.lessons || []).slice();
+            pch.summary = `${pch.summary} Written lessons copied from the old database, which was mostly Perchance.`;
+            this.saveSnapshot('Perchance', { playbook: pch, auto: true });
+          }
+        } finally {
+          this._learnOverride = null;
+        }
+        await this.buildPlaybook({ useLlm: false });
+      }
+      this.snapshots.migrated = true;
+      this.persistSnapshots();
     },
 
     /** Is the DeviantArt data stale enough to be worth a background refresh? */

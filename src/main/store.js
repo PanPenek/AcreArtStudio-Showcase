@@ -145,6 +145,8 @@ const DEFAULT_SETTINGS = {
     autoUploadApproved: false,
     artStyle: '',
     artStylePin: false,
+    qwenProse: true,
+    promptOrderTest: true,
     shape: '',
     generator: 'classic',
     advAutoFilters: true,
@@ -159,6 +161,7 @@ const DEFAULT_SETTINGS = {
     imageWorkflow: '',
     videoWorkflow: '',
     imagesPerPrompt: 6,
+    promptVariants: 3,
     maxReferences: 4,
     launchCommand: '',
     autoGif: false,
@@ -255,6 +258,11 @@ const DEFAULT_SETTINGS = {
     minExemplarAgeDays: 2,
     useLlmLessons: true,
     maxLessons: 8,
+    models: { 'qwen-image-2.1': true, perchance: true, else: false },
+    priorStrength: 20,
+    copyPrompts: false,
+    since: null,
+    activeSnapshot: null,
     autoSyncHours: 12,
     maxViewFetches: 400,
     syncLimit: 50,
@@ -598,6 +606,7 @@ class Store {
       },
       rotation: { round: 0, seeds: {}, modes: [] },
     });
+    this.snapshots = new JsonFile(path.join(userDataDir, 'snapshots.json'), { items: [], migrated: false });
     this.titles = new JsonFile(path.join(userDataDir, 'titles.json'), {
       used: [],
       cursor: 0,

@@ -75,6 +75,13 @@
       .filter((r) => automatic.has(r.promptSource))
       .map((r) => String(r.deviationId || (r.da && r.da.deviationId) || '')).filter(Boolean));
     const eligible = (r, id = '') => r && !automatic.has(r.promptSource) && !automaticIds.has(String(id));
+    if (prose()) {
+      const refd = (c) => (window.Insights && Insights.isReferencePrompt) ? Insights.isReferencePrompt(c) : /<image\d+>/i.test(String(c.prompt || ''));
+      const mine = lib.filter((c) => c && c.promptStyle === 'prose' && !refd(c) && eligible(c, c.da && c.da.deviationId));
+      for (const c of mine) if (c.da && c.da.deviationId) push(c.prompt, 'card');
+      for (const c of mine) if (['approved', 'drafted'].includes(c.status)) push(c.prompt, 'card');
+      return out.slice(0, limit);
+    }
     for (const r of recipes) if (eligible(r, r && r.from)) push(r.prompt, 'recipe');
     for (const e of entries) {
       if (eligible(e, e && e.deviationId) && (e.link === 'upload' || e.link === 'manual' || !e.link)) push(e.prompt, 'origin');
@@ -128,6 +135,7 @@
   function enforceTail(text, prof = null) {
     const t = String(text || '').trim();
     if (!t) return t;
+    if (prose()) return stripTags(t);
     const p = prof || profile();
     const measured = p.enough ? p.tail.filter((k) => GUARD_RE.test(k) || QUALITY_RE.test(k)) : [];
     const want = [...new Set([...measured, 'no extra fingers', 'no extra limbs'])];
@@ -137,10 +145,88 @@
     return t.replace(/[,\s]+$/, '') + ', ' + missing.join(', ');
   }
 
+  /** Qwen-Image on ComfyUI reads plain sentences better than tag lists (on unless gen.qwenProse is false). */
+  function prose() {
+    const g = (window.State && State.settings && State.settings.gen) || {};
+    return g.engine === 'comfy' && g.qwenProse !== false;
+  }
+
+  const TAG_ONLY_RE = /^(?:masterpiece(?:\s+quality)?|best quality|high(?:est)? quality|ultra[- ]?detailed|highres|absurdres|[248]k(?:\s+resolution)?|uhd|professional camera(?:\s+lens)?|1girl|1boy|2girls|solo|alone|no\s+(?:extra|artifacts?|text|watermarks?|deformed|bad|mutated|missing|duplicate|blur(?:ry)?)\b[^,]*)$/i;
+
+  /** Drop tag-list fragments (quality tokens, "no X" guards) from a sentence prompt. */
+  function stripTags(text) {
+    const t = String(text || '').trim();
+    if (!t) return t;
+    const parts = t.split(',');
+    const kept = parts.filter((p) => !TAG_ONLY_RE.test(p.trim().replace(/[.;:!]+$/, '').trim()));
+    if (kept.length === parts.length) return t;
+    let out = kept.join(',').replace(/(?:\s*,\s*)+$/, '').replace(/,(\s*,)+/g, ',').trim();
+    if (/[.!?"]$/.test(t) && !/[.!?"]$/.test(out)) out += '.';
+    return out;
+  }
+
+  const PROSE_LO = 60;
+  const PROSE_HI = 130;
+
+  /** Writing rules for sentence prompts; `arm` decides whether the moment or the character comes first. */
+  function proseRules(arm = 'action') {
+    const order = arm === 'character'
+      ? [
+        'The FIRST sentence says who the character is: a named character by name and series ("Frieren from'
+          + ' Sousou no Frieren, an elf mage with long white twin tails ..."), otherwise their look: hair, eyes, build and'
+          + ' what they are wearing.',
+        'Then what is happening to them right now and how they react (surprise, joy, focus,'
+          + ' determination), then the place, the light and the camera angle. A short spoken'
+          + ' line in quotes is welcome when it fits.',
+      ]
+      : [
+        'The FIRST sentence is the moment itself: what is happening to the character right now and how they react'
+          + ' (surprise, joy, focus, determination). If a named character is'
+          + ' pictured, name them in that first sentence ("Frieren from Sousou no Frieren looks up as ...").',
+        'Then their look (hair, eyes, build, outfit), then the place, the light and the camera'
+          + ' angle. A short spoken line in quotes is welcome when it fits.',
+      ];
+    return [
+      `Write plain English sentences for Qwen-Image, not a tag list: 3-6 sentences, ${PROSE_LO}-${PROSE_HI} words.`,
+      ...order,
+      'End with one short art-style sentence, e.g. "Painted anime style, dramatic rim light."',
+      'No quality tokens or tag soup: never "1girl", "solo", "masterpiece", "best quality", "4k". Never write'
+        + ' "no X" ("no extra fingers", "no text"): this generator has no negative prompt, so naming a thing draws it.',
+      'Never open by naming the medium ("anime illustration", "digital art of", "an image of").',
+    ];
+  }
+
+  function lengthRule(prof = null) {
+    if (prose()) return `${PROSE_LO}-${PROSE_HI} words each, in plain sentences.`;
+    const p = prof || profile();
+    return p.enough
+      ? `${p.lo}-${p.hi} words each, in comma-separated fragments — that is this artist's measured range.`
+      : '40-90 words each.';
+  }
+
+  function proseScore(p) {
+    const text = String(p || '').trim();
+    if (!text) return -99;
+    const w = words(text);
+    const fr = frags(text);
+    let score = 3;
+    const tags = fr.filter((x) => TAG_ONLY_RE.test(x.replace(/[.;:!]+$/, '').trim())).length;
+    score -= tags * 2;
+    if (LEAD_RE.test(text)) score -= 6;
+    if (w < PROSE_LO * 0.6 || w > PROSE_HI * 1.5) score -= 2;
+    const short = fr.filter((x) => words(x) <= 3).length;
+    if (fr.length >= 8 && short / fr.length > 0.6) score -= 3;
+    return score;
+  }
+
+  function voiceScore(p, prof = null) {
+    return prose() ? proseScore(p) : houseScore(p, prof);
+  }
+
   /** The best-formed, least alike of his prompts. */
   function exemplars({ n = SHOW, from = null } = {}) {
     const rows = (from || corpus()).map((c) => (typeof c === 'string' ? { text: c, src: '' } : c));
-    const ranked = rows.map((r) => ({ ...r, score: houseScore(r.text) }))
+    const ranked = rows.map((r) => ({ ...r, score: prose() ? proseScore(r.text) : houseScore(r.text) }))
       .filter((r) => r.score > 0)
       .sort((a, b) => b.score - a.score);
     const sim = window.promptSimilarity || (() => 0);
@@ -153,10 +239,23 @@
   }
 
   /** The block pasted into a prompt-writing call. */
-  function block({ n = SHOW, maxChars = 2200 } = {}) {
+  function block({ n = SHOW, maxChars = 2200, arm = 'action' } = {}) {
     const rows = corpus();
     const p = profile(rows.map((r) => r.text));
     const ex = exemplars({ n, from: rows });
+    if (prose()) {
+      const lines = [
+        'HOW TO WRITE FOR THIS GENERATOR (Qwen-Image 2.1 on ComfyUI). It reads plain English, not tag lists:',
+        ...proseRules(arm).map((r) => `- ${r}`),
+      ];
+      if (ex.length) {
+        lines.push('',
+          `QWEN PROMPTS OF HIS — ${ex.length} he kept. Match how they are written, not what they show:`,
+          ...ex.map((r, i) => `[${i + 1}] """${trim(r.text, 600)}"""`));
+      }
+      const out = lines.join('\n');
+      return out.length > maxChars ? out.slice(0, maxChars) + '…' : out;
+    }
     if (!p.enough || !ex.length) return '';
 
     const lines = [
@@ -183,6 +282,43 @@
     return out.length > maxChars ? out.slice(0, maxChars) + '…' : out;
   }
 
+  const ARM_KEY = 'acre.promptArms';
+  const ARM_CAP = 3000;
+  let armMap = null;
+  function arms() {
+    if (armMap) return armMap;
+    try { armMap = new Map(JSON.parse(localStorage.getItem(ARM_KEY) || '[]')); } catch { armMap = new Map(); }
+    return armMap;
+  }
+  function armKey(text) {
+    const cleaned = window.U && U.housePrompt ? U.housePrompt(String(text || '')) : String(text || '');
+    return stripTags(cleaned).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 200);
+  }
+
+  /** Prompt-order test: half the prompts open with the moment, half with the character, to learn which works. */
+  function pickArm(rnd = Math.random) {
+    if (!prose()) return null;
+    const g = (window.State && State.settings && State.settings.gen) || {};
+    if (g.promptOrderTest === false) return 'action';
+    return rnd() < 0.5 ? 'action' : 'character';
+  }
+
+  function noteArm(texts, arm) {
+    if (!arm) return;
+    const m = arms();
+    for (const t of [].concat(texts || [])) {
+      const k = armKey(t && typeof t === 'object' ? t.prompt : t);
+      if (k.length >= 20) { m.delete(k); m.set(k, arm); }
+    }
+    while (m.size > ARM_CAP) m.delete(m.keys().next().value);
+    try { localStorage.setItem(ARM_KEY, JSON.stringify([...m])); } catch {  }
+  }
+
+  function armOf(text) {
+    const k = armKey(text);
+    return (k && arms().get(k)) || null;
+  }
+
   window.PromptStyle = {
     SHOW,
     MIN_CORPUS,
@@ -192,6 +328,15 @@
     houseScore,
     enforceTail,
     block,
+    prose,
+    proseRules,
+    proseScore,
+    voiceScore,
+    lengthRule,
+    stripTags,
+    pickArm,
+    noteArm,
+    armOf,
     clean: (s) => (window.U ? U.housePrompt(s) : s),
   };
 })();

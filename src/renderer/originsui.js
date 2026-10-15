@@ -91,6 +91,7 @@
             <div class="arch-title">${esc(dev.title || 'Untitled')}
               <span class="src-badge ${tier.cls === 'ok' ? 'deviantart' : 'none'}">${esc(tier.label)}</span>
               ${res.link === 'none' && res.candidate ? `<span class="src-badge none">a likely card exists</span>` : ''}
+              ${window.Models ? `<span class="lf-tag" title="The model that made it">${esc(Models.label(dev.model || 'else'))}</span>` : ''}
             </div>
             <div class="arch-prompt">${res.prompt
               ? esc(res.prompt.slice(0, 190)) + (res.prompt.length > 190 ? '…' : '')

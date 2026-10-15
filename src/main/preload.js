@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('ala', {
     setPerf: (d) => invoke('db:setPerf', d),
     getPlaybook: () => invoke('db:getPlaybook'),
     setPlaybook: (d) => invoke('db:setPlaybook', d),
+    getSnapshots: () => invoke('db:getSnapshots'),
+    setSnapshots: (d) => invoke('db:setSnapshots', d),
     getTitles: () => invoke('db:getTitles'),
     setTitles: (d) => invoke('db:setTitles', d),
     getOrigins: () => invoke('db:getOrigins'),

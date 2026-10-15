@@ -7,6 +7,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' ala: data: blob: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ala:;" />
 <title>Acre Art Studio</title>
 <link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="videomerge.css" />
 <!-- Before the stylesheet takes effect on <body>: sets data-theme from a
      localStorage mirror so the window never flashes the other palette. -->
 <script src="theme.js"></script>
@@ -26,10 +27,11 @@
       <!-- Placed here by request, directly under the Dashboard. It does NOT take Ctrl+2:
            see NUM_TABS in app.js — the number keys are pinned to the historical order so
            that adding a tab here can never move Review off Ctrl+4. Ctrl+Shift+O instead. -->
-      <button class="nav-btn" data-tab="overseer"><span class="nav-ico">☰</span>Overseer<span class="nav-badge" id="badge-overseer" hidden title="Cards the Overseer made that are still waiting in Review — not unread messages">0</span></button>
+      <button class="nav-btn" data-tab="overseer"><span class="nav-ico">☰</span>Overseer<span class="nav-badge" id="badge-overseer" hidden title="Cards the Overseer made that are still waiting in Review — not unread messages. Right-click the button → Mark as read to clear it.">0</span></button>
             <button class="nav-btn" data-tab="promptlab"><span class="nav-ico">✧</span>Prompt Lab</button>
       <button class="nav-btn" data-tab="review"><span class="nav-ico">◉</span>Review<span class="nav-badge" id="badge-review" hidden>0</span></button>
       <button class="nav-btn" data-tab="imageedit" title="Edit a picture with Qwen-Image: brush an area and describe the change, or describe a change to the whole picture"><span class="nav-ico">✎</span>Image Edit</button>
+      <button class="nav-btn" data-tab="videomerge" title="Merge two or more pictures into one video: it opens on the first and is on each next one at its second, or lands on the last one"><span class="nav-ico">⇄</span>Video Merge</button>
       <button class="nav-btn" data-tab="drafts"><span class="nav-ico">⇪</span>Drafts<span class="nav-badge" id="badge-drafts" hidden>0</span></button>
       <button class="nav-btn" data-tab="stats"><span class="nav-ico">▤</span>Statistics</button>
       <!-- New tabs go AFTER Statistics, never before Review. Ctrl+1…9 is positional, and
@@ -441,12 +443,57 @@
           </aside>
         </div>
         <div class="ie-prompt-row">
+          <button class="btn ghost ie-ref-add" id="ie-ref-add" title="Attach a reference picture (or paste / drop one on the prompt box). Qwen sees it as &lt;image2&gt; and borrows only what your instruction asks for — e.g. &quot;give her the face expression from the reference&quot;. Each reference adds about 80 s per picture.">📎</button>
+          <input type="file" id="ie-ref-file" accept="image/png,image/jpeg,image/webp" multiple hidden />
           <textarea id="ie-prompt" rows="2" maxlength="1500" placeholder="Change the whole picture… e.g. make it night time with neon lights (Enter to edit, Shift+Enter for a new line)"></textarea>
           <button class="btn primary" id="ie-go">Edit</button>
         </div>
+        <div class="ie-refs" id="ie-refs" hidden></div>
         <div class="hint ie-from-line"><span id="ie-from"></span><span id="ie-status"></span></div>
         <div class="hint ie-licence">Qwen-Image 2.1 is under the Qwen Research Licence (non-commercial).</div>
       </div>
+    </section>
+
+    <section class="tab-pane" id="pane-videomerge">
+      <div class="pane-head vm-head">
+        <div>
+          <h1>Video Merge</h1>
+          <div class="pane-sub">Two or more pictures in one clip: it opens on the first and is on each next one at its second.</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn" id="vm-add-card">＋ From library…</button>
+          <button class="btn" id="vm-upload">＋ Upload…</button>
+          <input type="file" id="vm-file" accept="image/png,image/jpeg,image/webp" multiple hidden />
+        </div>
+      </div>
+      <div class="hint err" id="vm-engine" hidden></div>
+      <div class="vm-strip" id="vm-strip"></div>
+      <div class="vm-timeline" id="vm-timeline"></div>
+      <div class="panel vm-controls">
+        <div class="vm-row">
+          <label class="ie-inline" title="Length of the whole clip (about 10 s of video per 100 s of GPU time)">Length
+            <input type="number" id="vm-seconds" min="4" max="60" step="1" value="10" style="width:64px" /> s</label>
+          <label class="ie-inline" title="Picture 1 is stretched onto the canvas, so the canvas should follow its shape">Frame
+            <select id="vm-aspect"></select></label>
+          <label class="ie-inline" title="On: the clip ends exactly on the last picture. Off: the last picture is reached at its time and the clip carries on from it.">
+            <input type="checkbox" id="vm-land" checked /> End exactly on the last picture</label>
+          <label class="ie-inline">Prompt
+            <select id="vm-mode">
+              <option value="auto">Auto — the model writes how it changes</option>
+              <option value="hybrid">Hybrid — my words, the model fills in</option>
+              <option value="custom">Custom — exactly my words</option>
+            </select></label>
+        </div>
+        <div id="vm-words-wrap" hidden>
+          <textarea id="vm-words" rows="3" maxlength="2000" placeholder="What should happen between the pictures? e.g. her hair grows out, the outfit swaps, a slow push-in"></textarea>
+        </div>
+        <div class="btn-row"><button class="btn" id="vm-write">Write prompt</button></div>
+        <textarea id="vm-prompt" rows="9" maxlength="4000" placeholder="The prompt that is sent to the video model appears here. Edit it before rendering."></textarea>
+        <div class="btn-row vm-render-row"><button class="btn primary" id="vm-render" disabled>Render merged video</button><div class="hint" id="vm-status"></div></div>
+        <pre class="vm-log" id="vm-log"></pre>
+      </div>
+      <h2 id="vm-hist-title" class="vm-hist-title" hidden>Merged clips</h2>
+      <div class="vm-hist" id="vm-hist"></div>
     </section>
 
     <!-- DRAFTS -->
@@ -508,6 +555,37 @@
           </div>
         </div>
         <div id="stats-sync-status" class="hint">Never synced. This reads your published gallery through the DeviantArt tab's session — read-only, nothing is posted or changed.</div>
+      </div>
+      <div class="panel" id="panel-learnfrom">
+        <div class="panel-head"><h2>Learning from <span class="hint">which models' posts teach the app what your audience clicks</span></h2>
+          <div class="btn-row">
+            <button class="btn" id="btn-snap-save" title="Save what the app has learned right now under a name — use it again later, or tell the Overseer to use it">Snapshot</button>
+            <button class="btn danger" id="btn-learn-clear" title="Save a snapshot, then start learning again from posts published from now on">Clear</button>
+          </div>
+        </div>
+        <div class="lf-models" id="lf-models"></div>
+        <div class="hint" id="lf-summary" style="margin-top:12px"></div>
+        <div class="note">Click a model to turn it on or off — its posts stay in your stats, they just stop teaching.
+          The model the app writes for counts in full; the others are a <b>starting guess that fades</b> as its own posts come in.
+          <b>Else</b> is everything without a card in the app (posted before it existed or by hand): titles and tags only.
+          The app learns <b>what your audience clicks</b> — it never copies old prompts or pictures, and prompt wording is never borrowed from another model.</div>
+      </div>
+      <div class="dash-grid">
+        <div class="panel">
+          <div class="panel-head"><h2>How the models mix <span class="hint" id="lf-mix-sub"></span></h2></div>
+          <div id="lf-mix"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Snapshots <span class="hint" id="lf-snap-count"></span></h2></div>
+          <div id="lf-snaps"></div>
+          <div class="note">The Overseer can use any snapshot by name without switching to it — e.g. “make 6 prompts, use the Perchance database”.</div>
+        </div>
+      </div>
+      <div class="panel" id="panel-ordertest">
+        <div class="panel-head"><h2>Prompt order test <span class="hint">Qwen-image-2.1 · moment first vs. character first</span></h2>
+          <div class="checkbox-row" style="margin:0"><input type="checkbox" id="ot-on" /><span>running</span></div>
+        </div>
+        <div id="ot-body"></div>
       </div>
       <div class="card-row" id="stats-cards"></div>
       <div class="dash-grid">
@@ -591,6 +669,12 @@
       <div class="panel">
         <div class="panel-head"><h2>Everything published <span class="hint" id="stats-all-count"></span></h2>
           <div class="btn-row">
+            <select id="stats-model" style="width:auto" title="Show the posts of one model">
+              <option value="">All models</option>
+              <option value="qwen-image-2.1">Qwen-image-2.1</option>
+              <option value="perchance">Perchance</option>
+              <option value="else">Else</option>
+            </select>
             <select id="stats-sort" style="width:auto">
               <option value="vsPeers">vs same-age posts</option>
               <option value="perDay">Engagement / day</option>
@@ -615,13 +699,12 @@
          on the art. The builder is the same for both up to the moment of composition. -->
     <section class="tab-pane" id="pane-comics">
       <header class="pane-head"><h1>Comics</h1>
-        <p class="pane-sub">Write it, draw it panel by panel, letter it, and send the finished page to Review like any other picture.</p></header>
+        <p class="pane-sub">One premise, one button: cast sheets, panels drawn with the same character in every one, words written to match the pictures, and the finished page in Review. Everything stays editable.</p></header>
       <div class="comic-shell">
         <aside class="comic-rail">
           <div class="panel-head"><h2>Projects</h2></div>
           <div class="btn-row" style="margin-bottom:10px">
-            <button class="btn primary small" id="btn-comic-new-page">+ Comic page</button>
-            <button class="btn small" id="btn-comic-new-story">+ Illustrated story</button>
+            <button class="btn primary small" id="btn-comic-new">+ New comic</button>
           </div>
           <div id="comic-projects" class="comic-projects"></div>
         </aside>
@@ -853,6 +936,7 @@
      pipeline calls into it from postCardToPixiv. -->
 <script src="pixiv.js"></script>
 <script src="variety.js"></script>
+<script src="models.js"></script>
 <script src="insights.js"></script>
 <script src="teach.js"></script>
 <!-- After insights.js: the title corpus folds in the DeviantArt titles that insights owns. -->
@@ -878,6 +962,8 @@
 <!-- After pipeline.js and overseer.js: edit jobs reuse Pipeline.makeJob and Overseer.editPrompt. -->
 <script src="imageedit.js"></script>
 <script src="imageeditui.js"></script>
+<script src="videomerge.js"></script>
+<script src="videomergeui.js"></script>
 <script src="health.js"></script>
 <script src="providers.js"></script>
 <script src="originsui.js"></script>

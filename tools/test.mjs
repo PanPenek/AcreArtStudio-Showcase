@@ -17,6 +17,10 @@
  *   - teach.js        : pictures marked good feed the playbook; forgetting one removes its lessons
  *   - pipeline.js     : a disputed QC veto goes to Review, a confirmed one does not
  *   - comfyfind.js    : an installed ComfyUI (Comfy Desktop, portable) is found on disk
+ *   - videomerge.js   : the timeline of a clip that runs through several pictures
+ *   - models.js       : which image model made a picture
+ *   - imageedit.js    : a character remake is described in words, not pasted
+ *   - promptstyle.js  : tag-list fragments are dropped from plain-sentence prompts
  */
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -295,6 +299,65 @@ console.log('comfyfind.js');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+console.log('videomerge.js');
+{
+  const w = load('videomerge.js');
+  const VM = w.VideoMerge;
+  test('pictures are spaced evenly, and the last one can land on the final frame', () => {
+    const t = VM.defaultTimes(3, 10, false);
+    assert.ok(t.length === 3 && t[0] === 0 && t[1] > 0 && t[2] > t[1] && t[2] < 10);
+    assert.equal(VM.defaultTimes(3, 10, true)[2], 'end');
+    assert.equal(VM.defaultTimes(2, 10, true).join(), '0,end');
+  });
+  test('a timeline that goes backwards or runs past the clip is refused', () => {
+    assert.equal(VM.check([{}, { at: 4 }, { at: 3 }], 10, false).ok, false);
+    assert.equal(VM.check([{}, { at: 12 }], 10, false).ok, false);
+    assert.equal(VM.check([{}], 10, false).ok, false);
+    assert.equal(VM.check([{}, { at: 4 }, { at: 'x' }], 10, true).ok, true);
+  });
+  test('the timeline reads as letters and seconds', () => {
+    assert.equal(VM.describe([{}, { at: 4 }, {}], true), 'A 0 s → B 4 s → C end');
+  });
+}
+
+console.log('models.js');
+{
+  const w = load('models.js');
+  const M = w.Models;
+  test('a card names its model; older cards are inferred from their size', () => {
+    assert.equal(M.ofCard({ model: 'perchance' }), 'perchance');
+    assert.equal(M.ofCard({ width: 512, height: 768 }), 'perchance');
+    assert.equal(M.ofCard(null), 'else');
+    assert.equal(M.label('qwen-image-2.1'), 'Qwen-image-2.1');
+  });
+}
+
+console.log('imageedit.js (character remake)');
+{
+  const w = load('state.js', 'comfy.js', 'imageedit.js');
+  const E = w.ImageEdit;
+  test('the remake prompt carries the design in words and no second picture', () => {
+    const p = E.remakePrompt('short silver hair with a blue ribbon, green eyes, round glasses.');
+    assert.ok(p.startsWith('Edit <image1>. Redraw the main character with a new hairstyle and face: short silver hair with a blue ribbon, green eyes, round glasses. '));
+    assert.ok(!/<image2>/.test(p));
+    assert.ok(/same art style as <image1>/.test(p) && /Keep the body shape, pose/.test(p));
+  });
+  test('the reference reader asks only for the design, never clothing or pose', () => {
+    assert.ok(/Do NOT describe: clothing/.test(E.DESIGN_PROMPT));
+    assert.ok(/"ok": true/.test(E.DESIGN_PROMPT));
+  });
+}
+
+console.log('promptstyle.js (plain sentences)');
+{
+  const w = load('promptstyle.js');
+  const P = w.PromptStyle;
+  test('quality tags and "no X" guards are dropped from a sentence prompt', () => {
+    assert.equal(P.stripTags('A fox reads a map under a lantern, masterpiece, best quality, 4k, no extra fingers.'), 'A fox reads a map under a lantern.');
+    assert.equal(P.stripTags('A lighthouse in a storm.'), 'A lighthouse in a storm.');
+  });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

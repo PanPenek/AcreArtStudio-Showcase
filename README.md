@@ -69,8 +69,9 @@ falls back to the next one on its own.
 - 🧠 **Prompt Lab**: write new prompts from an example prompt, from a reference picture, from web research or from a short story
 - 🖼️ **Two image engines**: Perchance (free, in-app browser, no GPU needed) or ComfyUI (local, any workflow you like, including video)
 - 🎬 **Image to video**: turn an approved picture into a short clip, which the app then checks itself (length, sound, speech, what's on screen)
-- ✏️ **Edit with words**: *"make the sky orange"* edits an existing picture
-- 📚 **Comics and illustrated stories**: premise → character sheet → script → panels → a finished, lettered page
+- 🎞️ **Video Merge**: one clip that runs through two or more pictures, reaching each one at the second you choose
+- ✏️ **Edit with words**: *"make the sky orange"* edits an existing picture. Attach reference pictures for the change, or ask for *"the character from image2"* and the character is redrawn in the picture's own style
+- 📚 **Comics, webtoons and illustrated stories**: one premise, one button. The app plans the panels, draws a clean sheet per character and attaches it to every panel so the character stays the same person, keeps the best take of each panel, and writes the words to match what was actually drawn
 - 🔁 **Continuations**: someone asked for "part 2"? It writes a sequel prompt that keeps the same character and outfit
 
 **Checking**
@@ -81,7 +82,7 @@ falls back to the next one on its own.
 **Publishing and learning**
 - ☁️ Uploads to **DeviantArt** as private drafts (publishing is a separate, deliberate step)
 - 📤 A **Patreon posting deck**: picture, title and text go to the clipboard in the order Patreon asks for them
-- 📊 **Statistics and a learning loop**: which themes, tags and posting hours actually perform, turned into guidance for the next round
+- 📊 **Statistics and a learning loop**: which themes, tags and posting hours actually perform, turned into guidance for the next round. Every picture records which image model made it, so what works on one model is not taught to another
 - 🧑‍🏫 **Teach it**: write your own rules ("always…", "never…") that the app follows and that no automatic rebuild can overwrite
 
 **Running on its own (optional)**
@@ -115,7 +116,8 @@ flowchart LR
    instead. The app shows the writer real examples of *your* prompts, then tidies the result
    in code. For variety it first extracts the **skeleton** of a good prompt (which slots it
    fills and in what order) and writes new prompts against that skeleton. You get new
-   scenes in the same style, not the same words shuffled.
+   scenes in the same style, not the same words shuffled. For Qwen-Image the prompts are
+   written as plain sentences instead, which that model follows better than tag lists.
 3. **Images are generated.** Each prompt is rendered several times. While the GPU works on
    the next job, the previous batch is already being inspected, so the two never wait for
    each other.
@@ -228,28 +230,30 @@ matter if you want to publish.
 | Tab | What you do there |
 |---|---|
 | **Dashboard** | Is everything working? One status row per job (writing, metadata, quality check, generation, upload), plus what's running right now |
-| **Overseer** | Chat with the assistant. It can research a subject, write and queue prompts, edit pictures, make videos and report back. Every action it takes is shown, so you can check what it did |
+| **Overseer** | Chat with the assistant. It can research a subject, write and queue prompts, edit pictures, make and merge videos, make comics and report back. Every action it takes is shown, so you can check what it did, and with a reasoning model its thinking is one click away (💭 Thought) |
 | **Prompt Lab** | Write prompts from examples, reference images or a story. Manage the generation queue |
 | **Review** | The main grid: every picture with its score, defects, prompt and metadata. Keyboard-driven. Every card has **✎ Edit** and **🩹 Fix** |
-| **Image Edit** | Edit one picture with Qwen-Image 2.1: brush an area and say what should change there, or describe a change to the whole picture. Every result is a numbered checkpoint in a history panel (undo, redo with a new seed, reuse an instruction, branch from an older one). Results keep the source picture's size |
+| **Image Edit** | Edit one picture with Qwen-Image 2.1: brush an area and say what should change there, or describe a change to the whole picture. Every result is a numbered checkpoint in a history panel (undo, redo with a new seed, reuse an instruction, branch from an older one). Results keep the source picture's size. 📎 attaches up to three reference pictures; *"make her the character from image2"* has a vision model describe that character and redraws it in the source picture's style |
+| **Video Merge** | One clip through two or more pictures: set the second each picture is reached, let the model write how it changes (or write it yourself) and render it with the ComfyUI video workflow. The clip lands in Review as a new card |
 | **Drafts** | What has been uploaded, what is waiting, what failed and why |
 | **Statistics** | How published work performs, the learned playbook, and your own *Teach it* rules |
-| **Comics** | Build comic pages and illustrated stories, with a live preview of the real page |
+| **Comics** | Comic pages, webtoon strips and illustrated stories from one premise and one button. Pick another take, reroll or edit a panel in words, and drag, resize or rewrite balloons on the live page. Six page styles |
 | **Continuations** | Turn "please make a part 2!" into a prompt that keeps the character |
 | **Perchance / Upscaler / DeviantArt / Patreon** | Built-in browser tabs for those sites. You sign in once and the app reuses the session |
 | **Settings** | One section at a time, with a search box that finds any setting. 9 colour themes |
 
-**Sidebar order:** hold any tab for a second and drag it where you want it; the other tabs slide out of the way. Settings → Library & app → *Sidebar order* resets it.
+**Sidebar order:** hold any tab for a second and drag it where you want it; the other tabs slide out of the way. Settings → Library & app → *Sidebar order* resets it. Right-click the Overseer tab → *Mark as read* clears its badge.
 
 **Fixing broken pictures:** 🩹 Fix on a card repairs fingers, mushed detail, proportions, the face, or whatever QC found. When a vision model is available it first describes the *corrected* picture, which works much better than a list of defects. Local damage is repaired with an edit that keeps the look; a broken body gets a fresh render on new seeds with the same character, outfit and scene in a simpler pose. With *Auto-fix failed pictures* on (Settings → Generation), a picture that fails QC is repaired automatically, up to two tries. The Overseer can do the same on request ("fix the last batch").
 
 <table>
 <tr>
 <td width="50%"><img src="docs/screenshots/overseer.png" alt="Overseer chat"><br><sub><b>Overseer</b>: talk to the app in plain English</sub></td>
-<td width="50%"><img src="docs/screenshots/comics.png" alt="Comics tab"><br><sub><b>Comics</b>: premise to finished page in five steps</sub></td>
+<td width="50%"><img src="docs/screenshots/comics.png" alt="Comics tab"><br><sub><b>Comics</b>: one premise and one button to a finished, lettered page</sub></td>
 </tr>
 <tr>
-<td colspan="2"><img src="docs/screenshots/settings.png" alt="Settings"><br><sub><b>Settings → Status</b>: configured, observed and reachable are three separate questions</sub></td>
+<td width="50%"><img src="docs/screenshots/videomerge.png" alt="Video Merge tab"><br><sub><b>Video Merge</b>: one clip through two or more pictures</sub></td>
+<td width="50%"><img src="docs/screenshots/settings.png" alt="Settings"><br><sub><b>Settings → Status</b>: configured, observed and reachable are three separate questions</sub></td>
 </tr>
 </table>
 
@@ -264,8 +268,8 @@ matter if you want to publish.
   The UI is hand-written DOM plus one CSS file with theme tokens.
 - **One runtime dependency (Electron).** HTTP, file I/O, image handling and the test harness
   all use what Node and Chromium already provide.
-- **About 28,000 lines of JavaScript** in 41 modules (12 main-process, 29 UI), each opening
-  with a header that explains its job, and **650+ doc comments** on functions
+- **About 34,000 lines of JavaScript** in 48 modules (13 main-process, 35 UI), each opening
+  with a header that explains its job, and **700+ doc comments** on functions
 
 ### Architecture at a glance
 
@@ -357,8 +361,10 @@ AcreArtStudio-Showcase/
         ├── perchance.js, comfy.js     image/video engines
         ├── overseer*.js         the assistant
         ├── promptlab.js, promptstyle.js, variety.js, titles.js
-        ├── insights.js, teach.js, origins*.js   learning
+        ├── insights.js, teach.js, models.js, origins*.js   learning
         ├── comics*.js, comiclayout.js, continuations*.js
+        ├── videomerge*.js       the Video Merge tab
+        ├── fonts/               comic lettering fonts (SIL Open Font License)
         └── triage*.js, health.js, providers.js, …
 ```
 
@@ -374,7 +380,8 @@ The tests load the **real** module files into an isolated Node VM (the way the b
 would run them) and check their behaviour directly. You don't need Electron, a network
 connection, a GPU or an AI model to run them. They cover JSON recovery from messy AI
 answers, the quality tail added to every prompt, prompt detection, title similarity, comic page geometry
-and text wrapping, and the parser for the AI's batch picks.
+and text wrapping, the parser for the AI's batch picks, the Video Merge timeline, which image
+model made a picture, the character-remake prompt and tag clean-up for sentence prompts.
 
 Every JavaScript file also passes `node --check`.
 

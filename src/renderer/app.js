@@ -57,6 +57,7 @@
     }
 
     wireNav();
+    wireNavMenu();
     wireHealth();
     wireDashboard();
     wireQueuePanel();
@@ -77,6 +78,7 @@
     OverseerUI.wire();
     TriageUI.wire();
     ImageEditUI.wire();
+    VideoMergeUI.wire();
     renderSettings();
     wireSettings();
 
@@ -236,6 +238,7 @@
     if (tab === 'pixiv' && window.PixivUI) PixivUI.refreshStatus();
     if (tab === 'overseer' && window.OverseerUI) { OverseerUI.render(); OverseerUI.focusInput(); }
     if (tab === 'imageedit' && window.ImageEditUI) ImageEditUI.render();
+    if (tab === 'videomerge' && window.VideoMergeUI) VideoMergeUI.render();
   }
 
   function wireDashboard() {
@@ -565,12 +568,46 @@
     ).join('');
   }
 
+  const OVR_SEEN_KEY = 'ala.overseer.badgeSeenAt';
+  function overseerSeenAt() { return Number(localStorage.getItem(OVR_SEEN_KEY)) || 0; }
+
+  function wireNavMenu() {
+    let menu = null;
+    const close = () => { if (menu) { menu.remove(); menu = null; } };
+    $('#nav').addEventListener('contextmenu', (e) => {
+      const btn = e.target.closest('.nav-btn[data-tab="overseer"]');
+      if (!btn) return;
+      e.preventDefault();
+      close();
+      const badge = $('#badge-overseer');
+      const n = badge && !badge.hidden ? Number(badge.textContent) || 0 : 0;
+      menu = document.createElement('div');
+      menu.className = 'nav-menu';
+      menu.innerHTML = `<button data-act="read" ${n ? '' : 'disabled'}>✓ Mark as read${n ? ` (${n})` : ''}</button>`;
+      document.body.appendChild(menu);
+      const r = menu.getBoundingClientRect();
+      menu.style.left = Math.min(e.clientX, window.innerWidth - r.width - 4) + 'px';
+      menu.style.top = Math.min(e.clientY, window.innerHeight - r.height - 4) + 'px';
+      menu.addEventListener('click', (ev) => {
+        if (!ev.target.closest('[data-act="read"]:not(:disabled)')) return;
+        localStorage.setItem(OVR_SEEN_KEY, String(Date.now()));
+        close();
+        updateBadges();
+      });
+    });
+    document.addEventListener('pointerdown', (e) => { if (menu && !menu.contains(e.target)) close(); }, true);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    window.addEventListener('blur', close);
+    window.addEventListener('resize', close);
+  }
+
   function updateBadges() {
     const review = State.library.filter((c) => c.status === 'review' || c.status === 'qc_error').length;
     const drafts = State.library.filter((c) =>
       Pipeline.awaitingPublish(c) || c.status === 'upload_failed').length;
     const patreon = State.library.filter((c) => c.status === 'approved' && destFor(c) === 'patreon').length;
-    const agent = State.library.filter((c) => c.promptSource === 'overseer' && c.status === 'review').length;
+    const seen = overseerSeenAt();
+    const agent = State.library.filter((c) => c.promptSource === 'overseer' && c.status === 'review' && (Number(c.createdAt) || 0) > seen).length;
     const rb = $('#badge-review'), db = $('#badge-drafts'), pb = $('#badge-patreon'), ob = $('#badge-overseer');
     rb.hidden = !review; rb.textContent = review;
     db.hidden = !drafts; db.textContent = drafts;
@@ -717,7 +754,14 @@
     $('#btn-lab-pick').addEventListener('click', openPromptPicker);
     $('#btn-lab-best').addEventListener('click', () => {
       const recipes = (Insights.playbook && Insights.playbook.recipes) || [];
-      const best = recipes.find((r) => r.prompt);
+      const target = window.Models ? Models.active() : null;
+      const top = Insights.topPerformers(80, { learnOnly: true })
+        .filter(({ d }) => d.prompt && !d.usedReference && !/<image\d+>/i.test(d.prompt));
+      const pick = top.find(({ d }) => !target || d.model === target) || top[0];
+      const best = recipes.find((r) => r.prompt && !/<image\d+>/i.test(r.prompt)) || (pick ? {
+        prompt: pick.d.prompt, theme: pick.d.theme || '', title: pick.d.title,
+        perDay: pick.m.perDay == null ? '—' : Math.round(pick.m.perDay),
+      } : null);
       if (!best) {
         return toast('No measured winner yet — sync DeviantArt stats on the Statistics tab first.', 'err');
       }
@@ -919,10 +963,10 @@
 
   /** One line, shown wherever the playbook can be switched on, saying what it is built from. */
   function renderGuidanceState() {
-    const p = Insights.playbook;
+    const p = Insights.activePlaybook ? Insights.activePlaybook() : Insights.playbook;
     const text = (!p || p.source === 'none')
       ? '— nothing measured yet, so this currently adds nothing'
-      : `— ${p.source === 'deviantart'
+      : `— ${p.snapshot ? `snapshot "${p.snapshot.name}": ` : ''}${p.source === 'deviantart'
         ? `${p.daCount} published deviation(s)`
         : `${p.sampleSize} approve/reject decision(s)`}`
         + `${(p.lessons || []).length ? `, ${p.lessons.length} lesson(s)` : ''}`;
@@ -1677,6 +1721,12 @@
       statsShown = STATS_PAGE;
       renderPerfTable();
     });
+    $('#stats-model').addEventListener('change', (e) => {
+      statsModel = e.target.value;
+      statsShown = STATS_PAGE;
+      renderPerfTable();
+    });
+    wireLearnFrom();
 
     window.ala.dastats.onProgress((p) => {
       const el = $('#stats-sync-status');
@@ -1738,6 +1788,7 @@
   function renderStatsTab() {
     if (!$('#stats-cards')) return;
     renderSyncStatus();
+    if (window.Models) { renderLearnFrom(); renderModelMix(); renderSnapshots(); renderOrderTest(); }
     renderStatCards();
     renderTopPerformers();
     renderPlaybook();
@@ -1746,6 +1797,179 @@
     renderPerfTable();
     renderGuidanceState();
     if (window.OriginsUI) OriginsUI.render();
+  }
+
+  let statsModel = '';
+
+  const dayMonth = (t) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  async function relearnQuietly() {
+    try { await Insights.buildPlaybook({ useLlm: false }); } catch (e) { toast('Could not rebuild: ' + e.message, 'err'); }
+    renderStatsTab();
+  }
+
+  function wireLearnFrom() {
+    const models = $('#lf-models');
+    if (!models) return;
+    models.addEventListener('click', async (e) => {
+      const card = e.target.closest('[data-model]');
+      if (!card) return;
+      const id = card.dataset.model;
+      const on = Models.selected();
+      State.settings = await window.ala.settings.patch({ learn: { models: { [id]: !on.has(id) } } });
+      renderLearnFrom();
+      await relearnQuietly();
+    });
+    $('#lf-summary').addEventListener('click', async (e) => {
+      if (!e.target.closest('[data-allhistory]')) return;
+      e.preventDefault();
+      await Insights.learnFromAllHistory();
+      toast('Learning from every post again.', 'ok');
+      renderStatsTab();
+    });
+    $('#btn-snap-save').addEventListener('click', async () => {
+      const name = await askText('Save a snapshot', `Snapshot · ${dayMonth(Date.now())}`,
+        { label: 'A name you can tell the Overseer later — e.g. "use the Perchance database"' });
+      if (name === null) return;
+      try {
+        const s = Insights.saveSnapshot(name);
+        toast(`Saved "${s.name}".`, 'ok');
+      } catch (e) { toast('Could not save: ' + e.message, 'err'); }
+      renderSnapshots();
+    });
+    $('#btn-learn-clear').addEventListener('click', async () => {
+      const name = await askText('Clear what the app has learned?', `Before clear · ${dayMonth(Date.now())}`, {
+        label: 'A snapshot is saved first under this name, so you can use it again. Then the app learns only from posts'
+          + ' published from now on. Your synced stats, the archive and your Teach-it lessons and rules all stay.',
+      });
+      if (name === null) return;
+      const btn = $('#btn-learn-clear');
+      btn.disabled = true;
+      try {
+        const { saved } = await Insights.clear(name);
+        toast(saved ? `Saved "${saved.name}" and cleared — learning starts again from new posts.` : 'Cleared.', 'ok');
+      } catch (e) { toast('Could not clear: ' + e.message, 'err'); }
+      btn.disabled = false;
+      renderStatsTab();
+    });
+    $('#lf-snaps').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-sact]');
+      if (!b) return;
+      const id = b.closest('[data-snap]').dataset.snap;
+      if (b.dataset.sact === 'use') { await Insights.useSnapshot(id === 'live' ? null : id); toast(id === 'live' ? 'Using the live database.' : 'Using this snapshot — the live one keeps updating underneath.', 'ok'); }
+      else if (b.dataset.sact === 'del') {
+        const s = Insights.findSnapshot(id);
+        if (!s || !confirm(`Delete the snapshot "${s.name}"?`)) return;
+        await Insights.deleteSnapshot(id);
+      }
+      renderStatsTab();
+    });
+    $('#ot-on').addEventListener('change', async (e) => {
+      State.settings = await window.ala.settings.patch({ gen: { promptOrderTest: !!e.target.checked } });
+      renderOrderTest();
+    });
+    State.on('snapshots', () => renderSnapshots());
+  }
+
+  function renderLearnFrom() {
+    const root = $('#lf-models');
+    if (!root || !window.Models) return;
+    const on = Models.selected();
+    const target = Models.active();
+    const counts = Insights.modelCounts();
+    const sub = {
+      'qwen-image-2.1': 'writing prompts for this',
+      perchance: 'starting guess · fades as Qwen posts come in',
+      else: 'no card in the app · titles and tags only',
+    };
+    if (target === 'perchance') { sub.perchance = 'writing prompts for this'; sub['qwen-image-2.1'] = 'starting guess · fades as Perchance posts come in'; }
+    root.innerHTML = Models.LIST.map((m) => {
+      const c = counts[m.id] || { posts: 0, views72: null };
+      return `<div class="lf-model ${on.has(m.id) ? 'on' : 'off'}" data-model="${esc(m.id)}" title="Click to ${on.has(m.id) ? 'stop learning from' : 'learn from'} ${esc(m.label)} posts">
+        <div class="lf-top"><span class="lf-name">${esc(m.label)}</span><span class="lf-tick">${on.has(m.id) ? '✓' : ''}</span></div>
+        <div class="lf-nums"><div><b>${fmtNum(c.posts)}</b>posts</div><div title="Median views 72 hours after posting${c.measured ? `, over ${c.measured} post(s) with a view history that early` : ''}"><b>${c.views72 == null || c.measured < 10 ? '—' : fmtNum(c.views72)}</b>views @72h</div></div>
+        <div class="lf-sub"><span class="lf-tag ${m.id === target ? 'writing' : ''}">${esc(sub[m.id] || '')}</span></div>
+      </div>`;
+    }).join('');
+    const n = Models.LIST.filter((m) => on.has(m.id)).reduce((s, m) => s + ((counts[m.id] || {}).posts || 0), 0);
+    const since = Number((State.settings.learn || {}).since) || 0;
+    const active = (State.settings.learn || {}).activeSnapshot;
+    const snap = active ? Insights.findSnapshot(active) : null;
+    $('#lf-summary').innerHTML = (on.size
+      ? `Learning from <b>${fmtNum(n)}</b> posts${since ? ` <b>published after ${esc(dayMonth(since))}</b> (cleared) · <a href="#" data-allhistory>learn from all history again</a>` : ''}.`
+      : '<b>Nothing selected</b> — prompts are written from your Teach-it rules and Qwen\'s own prompt rules only.')
+      + (snap ? ` <span class="hint warn">Prompts are using the snapshot <b>${esc(snap.name)}</b>, not the live database.</span>` : '');
+  }
+
+  function renderModelMix() {
+    const root = $('#lf-mix');
+    if (!root) return;
+    const b = Insights.breakdowns();
+    const mix = b.mix || {};
+    const label = (id) => (window.Models ? Models.label(id) : id);
+    $('#lf-mix-sub').textContent = mix.blend ? `${label(mix.target)} vs the others · themes, tags and titles` : '';
+    if (!mix.blend) {
+      root.innerHTML = `<div class="hint">${mix.target && mix.models && !mix.models.includes(mix.target)
+        ? `${esc(label(mix.target))} is switched off, so nothing is blended — learning reads only the models that are on.`
+        : 'Only one model is switched on, so there is nothing to mix.'}</div>`;
+      return;
+    }
+    const rows = [...(b.themes || []), ...(b.tags || []).map((t) => ({ ...t, key: '#' + t.key })), ...(b.titleTraits || [])]
+      .filter((r) => r.prior && r.own && r.own.n > 0)
+      .sort((x, y) => (y.own.n - x.own.n) || (y.n - x.n))
+      .slice(0, 10);
+    const f = (v) => (v == null ? '—' : `${v}×`);
+    const cls = (v) => (v == null ? '' : v >= 1.05 ? 'up' : v <= 0.95 ? 'down' : '');
+    root.innerHTML = `<div class="tbl-wrap"><table class="stat-table lf-mix-table">
+      <thead><tr><th>What</th><th class="num">Others</th><th class="num">${esc(label(mix.target))}</th><th>${esc(label(mix.target))}'s say</th><th class="num">Used</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr>
+        <td class="t-title" title="${esc(r.key)}">${esc(r.key)}</td>
+        <td class="num ${cls(r.prior.lift)}">${f(r.prior.lift)} <span class="hint">(${r.prior.n})</span></td>
+        <td class="num ${cls(r.own.lift)}">${f(r.own.lift)} <span class="hint">(${r.own.n})</span></td>
+        <td><span class="lf-bar"><i style="width:${Math.round(r.ownShare * 100)}%"></i></span> ${Math.round(r.ownShare * 100)}%</td>
+        <td class="num ${cls(r.lift)}"><b>${f(r.lift)}</b></td></tr>`).join('') || '<tr><td colspan="5" class="hint">Nothing measured on both sides yet.</td></tr>'}
+      </tbody></table></div>
+      <div class="note">${esc(label(mix.target))}: ${fmtNum(mix.ownN)} measured posts · others: ${fmtNum(mix.priorN)}. A row with n ${esc(label(mix.target))}
+        posts uses n/(n+${mix.k}) of its own result — ${mix.k} posts is 50/50, ${mix.k * 3} is 75%. Prompt elements are not mixed:
+        they come only from ${esc(label(mix.target))} prompts written in its own style (${fmtNum(mix.promptRows)} so far).</div>`;
+  }
+
+  function renderSnapshots() {
+    const root = $('#lf-snaps');
+    if (!root) return;
+    const items = (Insights.snapshots && Insights.snapshots.items) || [];
+    const active = (State.settings.learn || {}).activeSnapshot || null;
+    const label = (id) => (window.Models ? Models.label(id) : id);
+    const p = Insights.playbook;
+    $('#lf-snap-count').textContent = items.length ? `${items.length} saved` : '';
+    const live = `<div class="lf-snap ${active ? '' : 'in-use'}" data-snap="live">
+        <div class="lf-what"><b>Live</b><span class="hint">${esc(((p && p.models) || [...Models.selected()]).map(label).join(' + ') || 'nothing selected')} · rebuilt every sync</span></div>
+        ${active ? '<button class="btn small" data-sact="use">Use</button>' : ''}
+      </div>`;
+    root.innerHTML = live + items.map((s) => `<div class="lf-snap ${active === s.id ? 'in-use' : ''}" data-snap="${esc(s.id)}">
+        <div class="lf-what"><b>${esc(s.name)}</b><span class="hint">${esc(dayMonth(s.createdAt))} · ${esc((s.models || []).map(label).join(' + ') || '—')} · ${fmtNum(s.posts || 0)} posts${s.auto ? ' · saved automatically' : ''}</span></div>
+        ${active === s.id ? '' : '<button class="btn small" data-sact="use">Use</button>'}
+        <button class="btn ghost small" data-sact="del" title="Delete this snapshot">×</button>
+      </div>`).join('');
+  }
+
+  function renderOrderTest() {
+    const root = $('#ot-body');
+    if (!root) return;
+    const t = Insights.orderTest();
+    const box = $('#ot-on');
+    if (box) box.checked = t.on;
+    const row = (name, a, what) => `<tr><td><b>${name}</b><div class="hint">${what}</div></td>
+      <td class="num">${fmtNum(a.made)}</td><td class="num">${fmtNum(a.posts)}</td>
+      <td class="num">${a.vsPeers == null ? '—' : a.vsPeers + '×'}</td>
+      <td class="num">${a.views72 == null ? '—' : fmtNum(a.views72)}${a.measured72 ? ` <span class="hint">(${a.measured72})</span>` : ''}</td></tr>`;
+    const enough = t.action.posts >= 20 && t.character.posts >= 20;
+    root.innerHTML = `<div class="tbl-wrap"><table class="stat-table">
+      <thead><tr><th>Order</th><th class="num">Pictures made</th><th class="num">Published</th><th class="num" title="Median against posts of the same age — 1× is typical">vs same-age posts</th><th class="num">Views @72h</th></tr></thead>
+      <tbody>${row('Moment first', t.action, 'opens on what is happening — how your best Perchance prompts opened')}
+      ${row('Character first', t.character, "opens on who the character is — Qwen's own prompt guide")}</tbody></table></div>
+      <div class="note">Each prompt-writing call flips a coin between the two orders and every picture remembers which one wrote it.
+        ${enough ? 'Both sides have 20+ published posts — the gap is starting to mean something.' : 'Below about 20 published posts per side the numbers are noise; give it about two weeks.'}</div>`;
   }
 
   function renderStatCards() {
@@ -1766,7 +1990,7 @@
 
   function renderTopPerformers() {
     const root = $('#stats-top');
-    const top = Insights.topPerformers(8);
+    const top = Insights.topPerformers(8, { learnOnly: true });
     if (!top.length) {
       root.innerHTML = `<div class="hint">Nothing synced yet. Hit <b>Sync from DeviantArt</b> above —
         it pages your published gallery through the browser session you already use to upload.</div>`;
@@ -1779,7 +2003,7 @@
         ${Insights.thumb(d) ? `<img src="${esc(Insights.thumb(d))}" alt="" referrerpolicy="no-referrer" loading="lazy" />` : ''}
         <div class="p-info">
           <div class="p-title">${esc(d.title || 'Untitled')}</div>
-          <div class="p-sub">${m.views ? fmtNum(m.views) + ' views · ' : ''}${fmtNum(m.favs)} favs · ${fmtNum(m.comments)} comments · ${Math.round(m.ageDays)}d old · ${Math.round(m.perDay)}/day${d.theme ? ' · ' + esc(d.theme) : ''}${d.promptSource === 'evolved' ? ' · <b>grown from a winner</b>' : ''}${v != null && v >= 1 ? ` · <span class="trend up" title="Engagement gained per day between the last two syncs — this one is still climbing">▲ ${Math.round(v)}/day now</span>` : ''}</div>
+          <div class="p-sub">${window.Models ? `<span class="lf-tag">${esc(Models.label(d.model || 'else'))}</span> ` : ''}${m.views ? fmtNum(m.views) + ' views · ' : ''}${fmtNum(m.favs)} favs · ${fmtNum(m.comments)} comments · ${Math.round(m.ageDays)}d old · ${Math.round(m.perDay)}/day${d.theme ? ' · ' + esc(d.theme) : ''}${d.promptSource === 'evolved' ? ' · <b>grown from a winner</b>' : ''}${v != null && v >= 1 ? ` · <span class="trend up" title="Engagement gained per day between the last two syncs — this one is still climbing">▲ ${Math.round(v)}/day now</span>` : ''}</div>
           ${d.note ? `<div class="p-note">${esc(d.note)}</div>` : ''}
         </div>
         <div class="p-metric" title="Its engagement against the median of the posts published closest to it in age — 1× is a typical post of its age. Ranked this way because per-day engagement mostly measures how new a post is.">
@@ -2071,13 +2295,16 @@
       </div>`).join('')
       + (b.source === 'local'
         ? `<div class="hint" style="grid-column:1/-1">Based on local keep/reject outcomes, including automated QC discards.
-                   Published evidence is insufficient. These are not verified human preferences or audience demand.</div>` : '');
+                   Published evidence is insufficient. These are not verified human preferences or audience demand.</div>` : '')
+      + (b.mix && window.Models
+        ? `<div class="hint" style="grid-column:1/-1">Themes, tags, titles and posting time: ${esc((b.mix.models || []).map(Models.label).join(' + ') || 'no model selected')}${b.mix.blend ? `, with ${esc(Models.label(b.mix.target))} counting more as its posts come in` : ''}.
+            Prompt elements: only ${esc(Models.label(b.mix.target))} prompts written in its own style — ${fmtNum(b.mix.promptRows)} so far${b.mix.promptRows < 3 * (State.settings.learn?.minSamples || 3) ? ', so that column fills in as new posts are measured' : ''}.</div>` : '');
   }
 
   function renderPerfTable() {
     const root = $('#stats-table');
     if (!root) return;
-    const rows = Insights.scored();
+    const rows = Insights.scored().filter(({ d }) => !statsModel || (d.model || 'else') === statsModel);
     $('#stats-all-count').textContent = rows.length ? `· ${rows.length}` : '';
     if (!rows.length) { root.innerHTML = `<div class="hint">Nothing synced yet.</div>`; return; }
     const peer = Insights.peerScores ? Insights.peerScores() : new Map();
@@ -2098,7 +2325,7 @@
         <th class="num">Comm.</th><th class="num">Fav rate</th>
         <th class="num" title="Engagement against the posts published closest to it in age — 1× is a typical post of its age">vs age</th><th class="num">/day</th>
         <th class="num" title="Engagement per day between the last two syncs — needs two syncs to show">Now</th>
-        <th class="num">Age</th><th>Source</th>
+        <th class="num">Age</th><th>Model</th><th>Source</th>
       </tr></thead><tbody>
       ${page.map(({ d, m }) => {
         const v = Insights.velocity(d);
@@ -2113,6 +2340,7 @@
         <td class="num">${m.perDay == null ? '—' : Math.round(m.perDay)}</td>
         <td class="num">${v == null ? '—' : `<span class="trend ${v >= 1 ? 'up' : ''}">${v >= 1 ? '▲' : ''}${Math.round(v)}</span>`}</td>
         <td class="num">${Math.round(m.ageDays)}d</td>
+        <td>${esc(window.Models ? Models.label(d.model || 'else') : '')}</td>
         <td>${esc(d.promptSource || (d.cardId ? 'app' : 'manual'))}</td>
       </tr>`;
       }).join('')}
@@ -2857,6 +3085,7 @@
           ${c.fname ? `<button class="btn ghost small" data-act="imageedit" title="Open this picture in the Image Edit tab — brush an area and describe the change. The result is a new card; this one is kept.">✎ Edit</button>
           <button class="btn ghost small" data-act="fixmenu" title="Re-render this picture as a repair of itself (fingers, mushed detail, proportions, face, or from its QC findings). The result is a new card; this one is kept.">🩹 Fix ▾</button>` : ''}
           ${c.upscaled ? `<button class="btn ghost small" data-act="unupscale" title="Restore the original image">↩</button>` : ''}
+          ${c.fname ? `<button class="btn ghost small" data-act="videomerge" title="Add this picture to Video Merge — one clip that goes through two or more pictures">⇄ Merge</button>` : ''}
           <button class="btn ghost small" data-act="convertvideo"
             title="Upload this image to the ComfyUI video workflow — the motion prompt can be written by the model, by you, or both. Takes a few minutes on the GPU.">🎬 ${c.video ? 'Re-make video' : 'Convert to video'}</button>
           ${c.video ? `<button class="btn ghost small" data-act="makegif" ${gifConversions.has(c) ? 'disabled' : ''}
@@ -3045,6 +3274,9 @@
         } else if (act === 'imageedit') {
           switchTab('imageedit');
           await ImageEditUI.open({ cardId: card.id });
+        } else if (act === 'videomerge') {
+          switchTab('videomerge');
+          await VideoMergeUI.open({ cardId: card.id });
         } else if (act === 'fixmenu') {
           ImageEditUI.openFixMenu(card, btn);
         } else if (act === 'upscale') {

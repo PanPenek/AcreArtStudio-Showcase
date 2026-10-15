@@ -465,6 +465,79 @@
     return null;
   }
 
+  const ASPECTS = [
+    ['1:1 (Square)', 1], ['2:3 (Portrait Photo)', 2 / 3], ['3:2 (Photo)', 3 / 2],
+    ['3:4 (Portrait Standard)', 3 / 4], ['4:3 (Standard)', 4 / 3],
+    ['9:16 (Portrait Widescreen)', 9 / 16], ['16:9 (Widescreen)', 16 / 9], ['21:9 (Ultrawide)', 21 / 9],
+  ];
+  function nearestAspect(w, h) {
+    w = Number(w); h = Number(h);
+    if (!(w > 0) || !(h > 0)) return null;
+    const r = w / h;
+    let best = null;
+    for (const [label, v] of ASPECTS) {
+      const d = Math.abs(Math.log(r / v));
+      if (!best || d < best.d) best = { label, d };
+    }
+    return best.label;
+  }
+  function setAspect(graph, label) {
+    let n = 0;
+    for (const node of Object.values(graph)) {
+      if (node && node.classType === 'ResolutionSelector' && node.inputs && 'aspect_ratio' in node.inputs) {
+        node.inputs.aspect_ratio = label; n++;
+      }
+    }
+    return n;
+  }
+
+  function addKeyframes(graph, frames, { fps = 24, seconds = null } = {}) {
+    const i2v = Object.keys(graph).find((id) => graph[id] && graph[id].classType === 'MiniMaxH3ImageToVideo');
+    if (!i2v) throw new Error('this video workflow has no MiniMax H3 image-to-video node, so it cannot take more than one picture');
+    const list = (frames || []).filter(Boolean);
+    const ends = list.filter((f) => f.at === 'end');
+    if (ends.length > 1) throw new Error('only one picture can be the last frame');
+    const timed = list.filter((f) => f.at !== 'end').map((f) => ({ ...f, sec: Number(f.at) }));
+    for (const f of timed) {
+      if (!Number.isFinite(f.sec) || f.sec <= 0) throw new Error(`a picture's time must be a number of seconds after 0, got "${f.at}"`);
+      if (seconds != null && f.sec >= Number(seconds)) throw new Error(`a picture at ${f.sec} s does not fit in a ${seconds} s clip`);
+    }
+    timed.sort((a, b) => a.sec - b.sec);
+    for (let i = 1; i < timed.length; i++) {
+      if (timed[i].sec === timed[i - 1].sec) throw new Error(`two pictures are set to the same time (${timed[i].sec} s)`);
+    }
+    const node = graph[i2v];
+    const out = { nodes: [], last: null, guides: [] };
+    if (ends[0]) {
+      graph.vm_last = { classType: 'LoadImage', inputs: { image: String(ends[0].fname) } };
+      node.inputs.last_frame = ['vm_last', 0];
+      out.last = 'vm_last';
+    }
+    if (timed.length) {
+      const consumers = [];
+      for (const [id, n] of Object.entries(graph)) {
+        if (!n || !n.inputs) continue;
+        for (const [k, v] of Object.entries(n.inputs)) {
+          if (isWire(v) && String(v[0]) === String(i2v) && Number(v[1]) === 0) consumers.push([id, k]);
+        }
+      }
+      if (!consumers.length) throw new Error('nothing reads the image-to-video conditioning in this workflow');
+      let cond = [i2v, 0];
+      timed.forEach((f, i) => {
+        const load = `vm_img_${i + 1}`, guide = `vm_guide_${i + 1}`;
+        graph[load] = { classType: 'LoadImage', inputs: { image: String(f.fname) } };
+        graph[guide] = {
+          classType: 'MiniMaxH3AddGuide',
+          inputs: { positive: cond, vae: node.inputs.vae, latent: [i2v, 1], image: [load, 0], frame_idx: Math.round(f.sec * fps) },
+        };
+        cond = [guide, 0];
+        out.guides.push({ id: guide, sec: f.sec, frame: Math.round(f.sec * fps) });
+      });
+      for (const [id, k] of consumers) graph[id].inputs[k] = cond;
+    }
+    return out;
+  }
+
   /** Image-to-video input node: a LoadImage the graph actually consumes. */
   function detectI2vInput(wf) {
     for (const [id, n] of Object.entries(wf.nodes)) {
@@ -782,14 +855,20 @@
       return this._defs;
     }
 
+    /** Does the running ComfyUI know this node type? */
+    async hasNode(classType) {
+      try { const d = await this.nodeDefs(); return !!(d && d[classType]); } catch { return false; }
+    }
+
     /** Generate images from a prompt through the configured image workflow. */
-    async generate(promptText, { count = 0, references = [], shouldStop = null, matchSource = false } = {}, log = () => {}) {
+    async generate(promptText, { count = 0, references = [], shouldStop = null, referenceLimit: jobRefLimit = 0, matchSource = false, aspect = '', workflow = '', variants = null } = {}, log = () => {}) {
       const cfg = this.cfg;
       await this.ensureServer({ log });
+      const wfFile = String(workflow || '').trim() || cfg.imageWorkflow;
 
       let wf;
       try {
-        wf = await this.loadWorkflow(cfg.imageWorkflow);
+        wf = await this.loadWorkflow(wfFile);
       } catch (e) {
         throw new Error('workflow: ' + e.message);
       }
@@ -815,12 +894,19 @@
           log(`Could not match the edit to the source size (${m.reason}) — it renders at the workflow's own size${m.scaled ? ', resized to the source' : ''}.`, 'warn');
         }
       }
+      if (aspect && !(matchSource && referenceResult && referenceResult.attached && referenceResult.attached.length)) {
+        const label = ASPECTS.some(([l]) => l === aspect) ? aspect : null;
+        const set = label ? setAspect(base, label) : 0;
+        if (set) log(`Canvas aspect: ${label}.`);
+        else log(`Could not set the canvas aspect to "${aspect}" — ${label ? 'this workflow has no ResolutionSelector' : 'unknown aspect'}; it renders at the workflow's own size.`, 'warn');
+      }
       if (slots.negative && typeof base[slots.negative].inputs.text !== 'string') {
         log('negative prompt slot is not plain text — leaving it alone', 'warn');
       }
       const seed = detectSeedSlot(wf);
 
       const n = perPrompt(count || cfg.imagesPerPrompt);
+      const texts = Array.isArray(variants) && variants.length ? variants.map((v) => String(v)) : null;
       const used = new Set();
       const images = [];
       for (let i = 1; i <= n; i++) {
@@ -829,6 +915,8 @@
           break;
         }
         const graph = JSON.parse(JSON.stringify(base));
+        const vi = texts ? (i - 1) % texts.length : 0;
+        if (texts) graph[target.id].inputs[target.field] = texts[vi];
         if (seed) {
           let s = randSeed();
           while (used.has(s)) s = randSeed();
@@ -837,12 +925,14 @@
         }
 
         const clientId = `ala-${Date.now()}-${randSeed().toString(16)}`;
-        log(`Submitting to ComfyUI${n > 1 ? ` (${i}/${n})` : ''} — workflow ${cfg.imageWorkflow}, seed ${seed ? graph[seed.id].inputs[seed.field] : '(n/a)'}${slots.traced ? '' : ' (prompt slot: fallback, no sampler traced)'}`);
+        log(`Submitting to ComfyUI${n > 1 ? ` (${i}/${n})` : ''}${texts && texts.length > 1 ? `, prompt ${vi + 1}/${texts.length}` : ''} — workflow ${wfFile}, seed ${seed ? graph[seed.id].inputs[seed.field] : '(n/a)'}${slots.traced ? '' : ' (prompt slot: fallback, no sampler traced)'}`);
         try {
           const sub = await this.submit(graph, clientId);
           if (!sub.ok) throw new Error(sub.error || 'ComfyUI rejected the workflow');
           const hist = await this.pollHistory(sub.promptId, log);
-          images.push(...await this.collectImages(hist));
+          const got = await this.collectImages(hist);
+          if (texts) for (const im of got) { im.prompt = texts[vi]; im.variantIndex = vi; }
+          images.push(...got);
         } catch (e) {
           if (!images.length) throw e;
           log(`Pass ${i}/${n} failed (${e.message}) — keeping the ${images.length} image(s) already rendered.`, 'warn');
@@ -968,7 +1058,7 @@
     }
 
     /** Image → video through the configured i2v workflow. */
-    async convertToVideo({ base64, mime = 'image/png', prompt, workflow, seconds, log = () => {} }) {
+    async convertToVideo({ base64, mime = 'image/png', prompt, workflow, seconds, frames, aspect, size, nameHint = 'i2v', log = () => {} }) {
       const cfg = this.cfg;
       await this.ensureServer({ log });
 
@@ -988,7 +1078,7 @@
       if (!imgNode) throw new Error('no LoadImage node found — this is not an image-to-video workflow');
 
       const ext = (mime || '').includes('jpeg') ? 'jpg' : 'png';
-      const fname = await this.uploadImage({ base64, ext, nameHint: 'i2v' });
+      const fname = await this.uploadImage({ base64, ext, nameHint });
       log(`Input image uploaded as ${fname}.`);
 
       const graph = JSON.parse(JSON.stringify(wf.nodes));
@@ -996,6 +1086,23 @@
         graph[target.id].inputs[target.field] = prompt.trim();
       }
       graph[imgNode].inputs.image = fname;
+      if (Array.isArray(frames) && frames.length) {
+        const up = [];
+        for (let i = 0; i < frames.length; i++) {
+          const f = frames[i];
+          const e2 = (f.mime || '').includes('jpeg') ? 'jpg' : 'png';
+          up.push({ fname: await this.uploadImage({ base64: f.base64, ext: e2, nameHint: nameHint + '-f' + (i + 2) }), at: f.at });
+        }
+        const placed = addKeyframes(graph, up, { seconds });
+        log(`Picture 1 starts the clip; ${up.length} more: ${up.map((f) => (f.at === 'end' ? 'the last frame' : `at ${f.at} s`)).join(', ')}.`);
+        if (placed.guides.length && !(await this.hasNode('MiniMaxH3AddGuide'))) {
+          throw new Error('this ComfyUI has no MiniMaxH3AddGuide node (needs ComfyUI 0.37+); use the last frame only');
+        }
+      }
+      if (aspect) {
+        const label = aspect === 'auto' ? (size ? nearestAspect(size.w, size.h) : null) : aspect;
+        if (label && setAspect(graph, label)) log(`Frame shape ${label}.`);
+      }
       const dur = detectDurationSlot(wf);
       if (seconds != null && seconds !== '') {
         const s = Number(seconds);
@@ -1035,12 +1142,12 @@
       if (!file) throw new Error('ComfyUI finished but reported no video output');
 
       const viewUrl = this.url(`/view?type=${file.type}&subfolder=${encodeURIComponent(file.subfolder || '')}&filename=${encodeURIComponent(file.filename)}`);
-      const saved = await window.ala.comfy.downloadVideo({ url: viewUrl, nameHint: 'i2v' });
+      const saved = await window.ala.comfy.downloadVideo({ url: viewUrl, nameHint });
       log(`Video ready: ${saved.fname} (${(saved.size / 1048576).toFixed(1)} MB)`);
       let gif = null;
       if (cfg.autoGif) {
         try {
-          gif = await window.ala.comfy.videoToGif({ fname: saved.fname, nameHint: 'i2v' });
+          gif = await window.ala.comfy.videoToGif({ fname: saved.fname, nameHint });
           log(`GIF ready: ${gif.fname} (${(gif.size / 1048576).toFixed(1)} MB)`);
         } catch (e) {
           log(`GIF conversion failed (the video is still saved): ${e.message}`);
@@ -1104,9 +1211,62 @@ Rules:
   const H3_FIRST_FRAME_LINE = 'For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.';
   const NEGATION_RE = /\b(no|not|don['’]?t|do not|never|without|avoid|stop)\b/i;
 
+  async function writeMergePrompt({ frames, userText = '', mode = 'auto', seconds = 10 }) {
+    userText = String(userText || '').trim();
+    if (!Array.isArray(frames) || frames.length < 2) throw new Error('a merge needs at least two pictures');
+    if (mode === 'hybrid' && !userText) throw new Error('enter your extra instructions for Hybrid mode, or choose Auto');
+    if (mode === 'hybrid' && userText.length > 2000) throw new Error('Hybrid instructions must fit within 2000 characters');
+    const total = Number(seconds) > 0 ? Number(seconds) : 10;
+    const times = frames.map((f, i) => (i === 0 ? 0 : f.at === 'end' ? total : Number(f.at)));
+    const described = [];
+    for (let i = 0; i < frames.length; i++) {
+      const d = await U.llmVision(
+        frames[i].base64, frames[i].mime || 'image/png',
+        'Describe this image in a few concrete sentences: the visual style (e.g. 2D anime illustration, 3D CG, photo), '
+        + 'the subject(s) with their body shape, hair, face, clothing, pose and expression, the framing (wide/medium/close-up, '
+        + 'camera angle), the setting, the lighting and the palette. Plain description only — no video terms.',
+        { role: 'vision' }, `Describing picture ${i + 1} of ${frames.length}`);
+      described.push(String(d.text || '').trim());
+    }
+    const key = frames.map((f, i) => `Picture ${i + 1} — on screen at ${times[i].toFixed(1)} s${i === frames.length - 1 && frames[i].at === 'end' ? ' (the very last frame)' : ''}:\n${described[i]}`).join('\n\n');
+    const rules = `You write prompts for MiniMax H3, an image-to-video model that generates video WITH sound. It is CFG-distilled: there is NO negative prompt, and every word you write is read as something to show or hear. The clip is ${total} seconds long and is anchored on ${frames.length} pictures at fixed times. Follow this format exactly:
+
+Line 1, verbatim: ${H3_FIRST_FRAME_LINE}
+Then one blank line, then three fields:
+integrated_multimodal_description: [Shot 1] <visual style taken from the pictures>, <shot size>. Open on Picture 1 exactly (same character, clothing, colours, composition, setting). Then write a TIMELINE in the form "[0.0s-4.0s] …" that covers the whole clip, with one block for the stretch before each picture and one for what follows the last. In every block say concretely WHAT CHANGES (body shape, hair, face, clothing, pose, setting, light) and HOW it develops second by second — a continuous, physical transformation, never a cut. The clip must be on each picture at its stated second: start the change early enough that it ARRIVES exactly on time, and keep the subject, style and framing of the target picture when it arrives. Exactly one camera move for the whole clip, as a sentence ("The camera holds a static shot", or "The camera pushes in with small amplitude at slow speed").
+overall_soundscape: 1-3 sentences of ambient, action and non-verbal human sounds. N/A only for total silence.
+non_diegetic_music: instruments and tempo, or N/A.
+
+Rules:
+- NEVER write negations such as "no zoom", "no cut", "without". Say what IS there.
+- Spoken words appear ONLY if the artist asked for speech, as <d>[English] exact words</d> with a speaker ID and voice. Otherwise only non-verbal sounds.
+- Visible text only if asked, in double quotes.
+- Keep the artist's requested action, camera and audio choices exactly; add concrete detail, never replace them.
+
+THE PICTURES (the clip must be on each one at its second):
+${key}`;
+    const sys = mode === 'hybrid'
+      ? `${rules}\n\nThe artist's words below are the required direction — every instruction in them must appear in the prompt, rephrased positively where needed.\n\nARTIST'S WORDS:\n${userText}`
+      : `${rules}\n\nChoose the most natural, smooth way to get from each picture to the next. No new characters.`;
+    const r = await U.llmChat(
+      [{ role: 'user', content: sys + '\n\nRespond with ONLY the final prompt text, nothing else.' }],
+      { temperature: 0.7, maxTokens: 1800, role: 'ideation' }, 'Writing the merge prompt');
+    let text = String(r.text || '').trim();
+    const j = extractJson(text);
+    if (j && typeof (j.prompt || j.text) === 'string') text = (j.prompt || j.text).trim();
+    text = text.replace(/^(final\s+prompt|prompt)\s*[:\-]\s*/i, '').trim();
+    if (!text) throw new Error('the model returned an empty prompt');
+    if (!text.startsWith(H3_FIRST_FRAME_LINE)) text = `${H3_FIRST_FRAME_LINE}\n\n${text.replace(/^For the target video[^\n]*\n*/i, '')}`;
+    if (mode === 'hybrid' && !text.includes(userText) && !NEGATION_RE.test(userText)) {
+      text = `${H3_FIRST_FRAME_LINE}\n\n${userText}\n\n${text.slice(H3_FIRST_FRAME_LINE.length).trim()}`;
+    }
+    return { prompt: text.slice(0, MAX_VIDEO_PROMPT), described: described.map((d) => d.slice(0, 1500)) };
+  }
+
   window.ComfyDriver = ComfyDriver;
   window.ComfyUI = {
     normalizeWorkflow, detectPromptSlots, detectSeedSlot, detectI2vInput, detectDurationSlot, extractJson, writeVideoPrompt,
+    writeMergePrompt, addKeyframes, nearestAspect, setAspect, ASPECTS,
     expandSubgraphs, promptFieldOf, widgetInputs, resolvePromptTarget, qwenReferenceTarget,
     clearQwenReferences, injectQwenReferences, referenceLimit, MAX_REFERENCE_IMAGES, ComfyDriver,
     sniffSize, engineDown, matchEditSize, qwenEditCanvas,

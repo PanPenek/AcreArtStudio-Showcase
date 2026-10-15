@@ -440,6 +440,17 @@ body {
 /* author `display` beats the UA stylesheet's [hidden]{display:none}, so empty
    badges kept showing "0" — restate it at author level. */
 .nav-badge[hidden] { display: none; }
+.nav-menu {
+  position: fixed; z-index: 1000; min-width: 160px; padding: 4px;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.nav-menu button {
+  display: block; width: 100%; text-align: left; padding: 7px 10px; font: inherit; font-size: 13px;
+  color: var(--text); background: transparent; border: none; border-radius: var(--radius-sm); cursor: pointer;
+}
+.nav-menu button:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+.nav-menu button:disabled { color: var(--text-faint); cursor: default; }
 .sidebar-foot { border-top: 1px solid var(--border); padding-top: 12px; }
 .worker-pill {
   display: flex; align-items: center; gap: 8px;
@@ -1538,7 +1549,10 @@ details.fold > *:not(summary) { margin-top: 10px; }
 /* ============================================================================
    Comics
    ========================================================================== */
-.comic-shell { display: grid; grid-template-columns: 250px 1fr; gap: 18px; align-items: start; }
+@font-face { font-family: "Comic Neue"; src: url("fonts/ComicNeue-Bold.ttf") format("truetype"); font-weight: 700; font-style: normal; }
+@font-face { font-family: "Comic Neue"; src: url("fonts/ComicNeue-BoldItalic.ttf") format("truetype"); font-weight: 700; font-style: italic; }
+@font-face { font-family: "Bangers"; src: url("fonts/Bangers-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; }
+.comic-shell { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: start; }
 @media (max-width: 1150px) { .comic-shell { grid-template-columns: 1fr; } }
 .comic-rail {
   background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
@@ -1553,83 +1567,81 @@ details.fold > *:not(summary) { margin-top: 10px; }
 .comic-proj.on { background: var(--bg-hover); border-color: var(--accent-dim); }
 .comic-proj > img, .comic-proj .arch-nothumb { width: 38px; height: 48px; object-fit: cover; border-radius: 4px; flex: 0 0 auto; }
 .cp-info { min-width: 0; }
-.cp-name {
-  font-size: 12.5px; font-weight: 600; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
-}
-.comic-work { min-width: 0; }
+.cp-name { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.comic-work { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
 
-/* The five stages, and the one button that says which of them is next. A stage that is
-   done, the stage you are on and a stage you have not reached have to be tellable apart
-   at a glance, or the strip is decoration rather than a map. */
-.cm-steps { display: flex; align-items: stretch; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; }
-.cm-step {
-  flex: 1 1 0; min-width: 104px; cursor: pointer; display: flex; flex-direction: column; gap: 2px;
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 8px 10px; background: var(--bg-raise); transition: border-color 120ms, background 120ms;
+.cx-brief textarea { min-height: 60px; }
+.cx-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.cx-row .fld { margin-bottom: 0; }
+.cx-cast { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 2px; }
+.cx-cast > .lbl { font-size: 12px; color: var(--text-dim); font-weight: 600; margin-right: 2px; }
+.cx-chip {
+  position: relative; width: 52px; height: 68px; border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--border-strong); background: var(--bg-hover); flex: 0 0 auto;
 }
-.cm-step:hover { border-color: var(--border-strong); background: var(--bg-hover); }
-.cm-step .cs-n {
-  font-size: 11px; font-weight: 700; color: var(--text-faint);
-  width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--border-strong);
-  display: flex; align-items: center; justify-content: center;
+.cx-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cx-chip .x {
+  position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%;
+  border: 0; background: rgba(0, 0, 0, .7); color: #fff; font-size: 11px; cursor: pointer; line-height: 18px; padding: 0;
 }
-.cm-step .cs-l { font-size: 12px; font-weight: 550; color: var(--text-dim); }
-.cm-step .cs-note { font-size: 11px; color: var(--text-faint); }
-.cm-step.done .cs-n { color: var(--green); border-color: var(--green); }
-.cm-step.done .cs-l { color: var(--text); }
-.cm-step.now { border-color: var(--accent-dim); background: var(--bg-hover); }
-.cm-step.now .cs-n { color: var(--accent-soft); border-color: var(--accent); }
-.cm-step.now .cs-l { color: var(--accent-soft); }
-.cm-arrow { color: var(--text-faint); font-size: 13px; align-self: center; }
-.cm-next { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.cm-next .hint { flex: 1 1 240px; min-width: 0; }
-
-/* The empty state teaches the order the stages run in — see ComicsUI.guideHtml. */
-.cm-guide { margin: 0 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.cm-guide li { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
-.cm-guide li b { color: var(--text); font-weight: 600; }
-
-.comic-panels { display: flex; flex-direction: column; gap: 14px; }
-.comic-panel {
-  display: grid; grid-template-columns: 190px 1fr; gap: 14px;
-  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px;
-  background: var(--bg-raise);
+.cx-chip .nm {
+  position: absolute; left: 0; right: 0; bottom: 0; font-size: 10px; text-align: center;
+  background: rgba(0, 0, 0, .62); color: #fff; padding: 1px 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-@media (max-width: 900px) { .comic-panel { grid-template-columns: 1fr; } }
-.comic-panel.generating { border-color: var(--accent-dim); }
-.comic-panel.failed { border-color: var(--red-dim); }
-.cpan-art { position: relative; }
-.cpan-art img {
-  width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--radius-sm);
-  display: block; cursor: zoom-in; background: var(--bg-hover);
+.cx-make { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.cx-make .btn.primary { font-size: 14px; padding: 9px 20px; }
+.cx-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-dim); }
+.cx-status .ph { font-weight: 650; color: var(--accent-soft); text-transform: capitalize; }
+.cx-status.err .ph { color: var(--red); }
+.cx-status .err-msg { color: var(--red); }
+.cx-dots { display: flex; gap: 4px; }
+.cx-dot { width: 22px; height: 8px; border-radius: 4px; background: var(--bg-hover-strong); }
+.cx-dot.queued { background: var(--border-hover); }
+.cx-dot.picking { background: var(--blue); }
+.cx-dot.ready { background: var(--green); }
+.cx-dot.failed { background: var(--red); }
+.cx-main { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 14px; align-items: start; }
+@media (max-width: 1300px) { .cx-main { grid-template-columns: 1fr; } }
+.cx-stage {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px; display: flex; justify-content: center; align-items: flex-start;
 }
-.cpan-empty {
-  width: 100%; aspect-ratio: 1; border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;
-  color: var(--text-faint); font-size: 12px;
+#cx-canvas { max-width: 100%; height: auto; flex: 0 0 auto; border-radius: 3px; cursor: pointer; }
+#cx-canvas.dragging { cursor: grabbing; }
+.cx-sheets { display: flex; gap: 12px; flex-wrap: wrap; }
+.cx-sheet { width: 112px; }
+.cx-sheet img, .cx-sheet .cx-empty {
+  width: 112px; height: 152px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-strong);
+  display: block; background: var(--bg-hover);
 }
-.cpan-n {
-  position: absolute; top: 6px; left: 6px; background: color-mix(in srgb, var(--bg) 82%, transparent);
-  color: var(--accent-soft); font-size: 11px; font-weight: 700;
-  border-radius: 4px; padding: 1px 6px;
+.cx-sheet img { cursor: zoom-in; }
+.cx-sheet .cx-empty { display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-faint); text-align: center; padding: 6px; }
+.cx-sheet .nm { font-size: 11.5px; font-weight: 600; margin: 4px 0 3px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cx-insp { position: sticky; top: 0; }
+.cx-insp .fld { margin-bottom: 8px; }
+.cx-takes { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.cx-take {
+  width: 84px; height: 84px; border-radius: 6px; overflow: hidden; border: 2px solid transparent;
+  cursor: pointer; position: relative; background: var(--bg-hover); padding: 0;
 }
-.cpan-body { min-width: 0; }
-.cpan-body .fld { margin-bottom: 8px; }
-.cpan-lines { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-.cpan-line { display: flex; gap: 6px; align-items: center; }
-.cpan-line .cl-speaker { flex: 0 0 110px; }
-.cpan-line .cl-text { flex: 1; min-width: 0; }
-.cpan-line .cl-kind { flex: 0 0 100px; }
-
-/* The preview is the real composer at a smaller scale — see comicsui.repaint. */
-.comic-stage {
-  margin-top: 14px; background: var(--bg); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 12px; display: flex; justify-content: center;
-  overflow: auto; max-height: 78vh;
-}
-#cm-canvas { max-width: 100%; border-radius: 4px; cursor: default; }
-#cm-canvas.dragging { cursor: grabbing; }
+.cx-take.on { border-color: var(--accent); }
+.cx-take img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cx-take .sc { position: absolute; left: 2px; bottom: 2px; font-size: 10px; background: rgba(0, 0, 0, .72); color: #fff; padding: 0 4px; border-radius: 3px; }
+.cx-lines { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.cx-line { display: flex; gap: 6px; align-items: center; }
+.cx-line .sp { flex: 0 0 96px; min-width: 0; }
+.cx-line .tx { flex: 1; min-width: 0; }
+.cx-line .kd { flex: 0 0 82px; }
+.cx-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.cx-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text-dim); }
+.cx-edit { display: flex; gap: 6px; margin: 8px 0; }
+.cx-edit input { flex: 1; min-width: 0; }
+.cx-guide { margin: 6px 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.cx-guide li { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+.cx-guide li b { color: var(--text); font-weight: 600; }
+.cx-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; max-height: 60vh; overflow-y: auto; }
+.cx-pick-grid img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 6px; cursor: pointer; border: 2px solid transparent; display: block; }
+.cx-pick-grid img:hover { border-color: var(--accent); }
 
 /* ---- Teach it: the hand-written playbook (teach.js) ------------------------
    Visually separated from the derived panels above it on purpose. Everything in
@@ -1766,6 +1778,28 @@ button.ov-v.link.tiny { display: inline; font-size: 11.5px; color: var(--text-fa
 .ov-time { font-size: 10.5px; color: var(--text-faint); margin-top: 3px; }
 .ov-msg.thinking .ov-bubble { color: var(--text-faint); font-style: italic; }
 
+.ov-think { align-self: flex-start; max-width: 100%; font-size: 12px; margin-bottom: 2px; }
+.ov-think-head {
+  display: flex; align-items: baseline; gap: 7px; cursor: pointer;
+  color: var(--text-faint); padding: 2px 2px;
+}
+.ov-think-head:hover { color: var(--text-dim); }
+.ov-think-ico { font-size: 11px; opacity: .65; }
+.ov-think-name { font-weight: 600; letter-spacing: .02em; }
+.ov-think-sum { color: var(--text-faint); }
+.ov-think-toggle { margin-left: auto; font-size: 0; }
+.ov-think-toggle::after {
+  content: 'show'; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; opacity: .7;
+}
+.ov-think.open .ov-think-toggle::after { content: 'hide'; }
+.ov-think-body {
+  display: none; margin: 3px 0 2px 18px; padding: 8px 11px; max-height: 300px; overflow: auto;
+  background: var(--bg-sunken); border: 1px solid var(--border); border-left: 2px solid var(--text-faint);
+  border-radius: var(--radius-sm); font-size: 11.5px; line-height: 1.5; color: var(--text-faint);
+  white-space: pre-wrap; overflow-wrap: anywhere; font-style: italic;
+}
+.ov-think.open .ov-think-body { display: block; }
+
 .ov-note { align-self: center; font-size: 11.5px; color: var(--text-faint); text-align: center; max-width: 80%; }
 .ov-note.err { color: var(--red); }
 /* A run marker earns rules on either side — it is the boundary between "what I asked for"
@@ -1780,6 +1814,9 @@ button.ov-v.link.tiny { display: inline; font-size: 11.5px; color: var(--text-fa
    cannot leave on a schedule — and "it said it queued ten" is a different claim from
    "queue_art returned queued: 10". */
 .ov-tool { align-self: flex-start; max-width: 76%; font-size: 12px; }
+.ov-tool-wrap { align-self: flex-start; max-width: 76%; display: flex; flex-direction: column; }
+.ov-tool-wrap .ov-tool { align-self: stretch; max-width: 100%; }
+.ov-tool-wrap:has(.ov-research-card) { max-width: min(92%, 980px); }
 .ov-tool-head {
   display: flex; align-items: baseline; gap: 8px; cursor: pointer;
   color: var(--text-dim); padding: 3px 2px;
@@ -2001,6 +2038,15 @@ body.triage-open #toast-root { bottom: 76px; }
 
 .ie-prompt-row { display: flex; gap: 10px; align-items: stretch; margin: 12px 0 6px; }
 .ie-prompt-row textarea { flex: 1; }
+.ie-prompt-row .ie-ref-add { padding: 0 12px; font-size: 18px; border: 1px solid var(--border); }
+.ie-prompt-row.ie-drop textarea { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.ie-refs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px; }
+.ie-ref { position: relative; display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 3px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-panel); }
+.ie-ref img { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; display: block; }
+.ie-ref-tag { font-size: 12px; color: var(--text-dim); }
+.ie-ref-x { background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 0 2px; }
+.ie-ref-x:hover { color: var(--text); }
+.ie-refs .hint { margin: 0; }
 .ie-from-line #ie-from { color: var(--text-dim); }
 .ie-licence { margin-top: 14px; }
 .ie-fixmenu {
@@ -2010,3 +2056,80 @@ body.triage-open #toast-root { bottom: 76px; }
 .ie-fixmenu > .btn { text-align: left; }
 .ie-fixfree { display: flex; gap: 6px; padding: 6px 4px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
 .ie-fixfree input { padding: 4px 8px; }
+
+@font-face { font-family: "Gochi Hand"; src: url("fonts/GochiHand-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; }
+.cx-star {
+  display: flex; gap: 8px; align-items: stretch; padding: 4px; border-radius: 8px;
+  border: 1px solid var(--border-strong); background: var(--bg-hover); flex: 0 0 auto;
+}
+.cx-star img { width: 52px; height: 68px; object-fit: cover; border-radius: 5px; display: block; }
+.cx-star-body { display: flex; flex-direction: column; gap: 4px; justify-content: center; min-width: 110px; position: relative; padding-right: 22px; }
+.cx-star .nm-in { width: 120px; padding: 3px 6px; font-size: 12px; }
+.cx-star .nm { font-size: 12px; font-weight: 600; }
+.cx-star .asis { font-size: 11px; color: var(--text-dim); display: flex; gap: 4px; align-items: center; cursor: pointer; }
+.cx-star .x {
+  position: absolute; top: 0; right: 0; width: 18px; height: 18px; border-radius: 50%;
+  border: 0; background: rgba(0, 0, 0, .55); color: #fff; font-size: 11px; cursor: pointer; line-height: 18px; padding: 0;
+}
+.cx-refs { display: flex; gap: 4px; margin: 2px 0 6px; }
+.cx-refs img { width: 34px !important; height: 34px !important; border-radius: 4px; object-fit: cover; }
+.cx-score { font-size: 10.5px; font-weight: 600; padding: 0 5px; border-radius: 8px; border: 1px solid var(--green); color: var(--green); }
+.cx-score.bad { border-color: var(--red); color: var(--red); }
+.cx-sheet .btn-row { gap: 4px; flex-wrap: wrap; }
+.cx-place { width: 220px; }
+.cx-place img, .cx-place .cx-empty { width: 220px; height: 124px; }
+.cx-place textarea { width: 100%; font-size: 11.5px; margin: 2px 0 6px; resize: vertical; }
+.cx-stage { position: relative; }
+#cx-canvas:focus { outline: none; }
+.cx-inline {
+  position: absolute; z-index: 5; font: 700 15px "Comic Neue", sans-serif; padding: 6px 8px; border-radius: 8px;
+  border: 2px solid var(--warn); background: var(--bg-panel); color: var(--text); box-shadow: 0 6px 22px rgba(0, 0, 0, .35); resize: both;
+}
+.cx-itembar {
+  display: none; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; padding: 6px 10px;
+  border: 1px solid rgba(245, 158, 11, .45); border-radius: var(--radius); background: rgba(245, 158, 11, .07);
+}
+.cx-itembar.on { display: flex; }
+.cx-itembar .lbl { font-size: 12px; font-weight: 600; color: var(--warn); margin-right: 4px; }
+.cx-itembar .btn.on { background: rgba(245, 158, 11, .22); border-color: var(--warn); }
+.cx-itembar select { padding: 3px 6px; font-size: 12px; width: auto; max-width: 180px; }
+#cx-lettering { min-width: 190px; }
+.cx-who { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 4px; }
+.cx-who-item { display: flex; gap: 5px; align-items: center; font-size: 12.5px; cursor: pointer; }
+.cx-who-item select { width: auto; padding: 1px 4px; font-size: 11.5px; }
+
+.lf-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.lf-model {
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px;
+  background: var(--bg-raise); cursor: pointer; transition: border-color 120ms, opacity 120ms;
+}
+.lf-model:hover { border-color: var(--border-hover); }
+.lf-model.on { border-color: var(--accent); }
+.lf-model.off { opacity: .55; }
+.lf-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lf-name { font-weight: 650; font-size: 14px; }
+.lf-tick {
+  width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--border-strong);
+  display: grid; place-items: center; font-size: 12px; color: var(--on-accent);
+}
+.lf-model.on .lf-tick { background: var(--accent); border-color: var(--accent); }
+.lf-nums { display: flex; gap: 16px; margin-top: 8px; }
+.lf-nums div { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+.lf-nums b { display: block; font-size: 17px; color: var(--text); letter-spacing: 0; text-transform: none; font-weight: 700; }
+.lf-sub { margin-top: 6px; }
+.lf-tag {
+  display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--border-strong); color: var(--text-dim);
+}
+.lf-tag.writing { border-color: var(--accent-dim); color: var(--accent-soft); }
+.lf-bar { display: inline-block; width: 90px; height: 6px; border-radius: 3px; background: var(--bg-hover-strong); overflow: hidden; vertical-align: middle; }
+.lf-bar i { display: block; height: 100%; background: var(--accent); }
+.lf-mix-table td.up { color: var(--ok); }
+.lf-mix-table td.down { color: var(--bad); }
+.lf-mix-table td, .lf-mix-table th { white-space: nowrap; }
+.lf-snap { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--border); }
+.lf-snap:last-child { border-bottom: none; }
+.lf-what { flex: 1; min-width: 0; }
+.lf-what b { font-weight: 600; }
+.lf-what .hint { display: block; }
+.lf-snap.in-use .lf-what b::after { content: "  ● in use"; color: var(--accent-soft); font-weight: 500; font-size: 12px; }

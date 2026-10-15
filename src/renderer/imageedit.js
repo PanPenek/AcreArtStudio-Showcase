@@ -48,8 +48,25 @@
    * artist's words reach Qwen as-is. ONE template for the whole app: Overseer.editPrompt is
    * the source (its tests pin it), and the tab uses exactly the same words.
    */
-  function editPrompt(instruction) {
-    return window.Overseer.editPrompt(instruction);
+  function editPrompt(instruction, refCount = 0) {
+    const O = window.Overseer;
+    if (refCount > 0 && O.isCharacterSwap(instruction)) return O.editPrompt(instruction, refCount);
+    return O.editPrompt(instruction) + refSentence(refCount);
+  }
+
+  const MAX_EDIT_REFS = 3;
+  function refSentence(n) {
+    const k = Math.max(0, Math.min(MAX_EDIT_REFS, Math.floor(Number(n) || 0)));
+    if (!k) return '';
+    const tags = Array.from({ length: k }, (_, i) => `<image${i + 2}>`);
+    const list = tags.length === 1 ? tags[0] : `${tags.slice(0, -1).join(', ')} and ${tags[tags.length - 1]}`;
+    return ` Use ${list} only as ${k === 1 ? 'a visual reference' : 'visual references'} for this change: take from ${k === 1 ? 'it' : 'them'} only what the change asks for; everything else comes from <image1>.`;
+  }
+
+  function cardRefs(card) {
+    const list = card && Array.isArray(card.chatReferences) ? card.chatReferences : [];
+    return list.slice(1).filter((r) => r && r.fname).slice(0, MAX_EDIT_REFS)
+      .map((r) => ({ id: String(r.id || `ref-${r.fname}`), fname: String(r.fname), mime: r.mime || '', name: String(r.name || 'reference') }));
   }
 
   /**
@@ -228,7 +245,7 @@
    *   { row: { id, fname, mime, name } }          — an uploaded file already in library/overseer.
    * Returns { job, batchId }.
    */
-  async function queueEdit({ source, prompt, label = '', count = 1, fixOf = null, autoFix = false, root = null, start = true, basePrompt = null, redoOf = null, instruction = '' } = {}) {
+  async function queueEdit({ source, prompt, label = '', count = 1, fixOf = null, autoFix = false, root = null, start = true, basePrompt = null, redoOf = null, instruction = '', refs = [], designOf = null } = {}) {
     if (!comfyOn()) throw new Error('image edits need the ComfyUI engine (Settings → Generation); Perchance cannot take a picture as input');
     if (!prompt) throw new Error('nothing to edit — the instruction is empty');
     const card = source && source.card;
@@ -240,13 +257,15 @@
     job.editOf = row.id;
     job.editRoot = root || (card && card.editRoot) || row.id;
     job.editLabel = clean(label).slice(0, 200);
-    job.chatReferences = [{ ...row }];
-    job.referenceIds = [row.id];
-    job.referenceCount = 1;
+    const extra = (Array.isArray(refs) ? refs : []).filter((r) => r && r.fname && r.id !== row.id).slice(0, MAX_EDIT_REFS);
+    job.chatReferences = [{ ...row }, ...extra.map((r) => ({ ...r }))];
+    job.referenceIds = job.chatReferences.map((r) => r.id);
+    job.referenceCount = job.chatReferences.length;
     if (card && card.prompt) job.basePrompt = card.prompt;
     if (basePrompt) job.basePrompt = basePrompt;
     if (redoOf) job.redoOf = redoOf;
     if (instruction) job.editInstruction = clean(instruction).slice(0, 1500);
+    if (designOf) job.designOf = { ...designOf };
     if (fixOf) job.fixOf = fixOf;
     if (autoFix) job.autoFix = true;
     const batchId = `b${U.uid()}`;
@@ -330,6 +349,58 @@ Look closely at the picture and answer ONLY with JSON:
 }
 Set "editable": false when the corrected picture CANNOT be reached by redrawing only the broken parts in this same composition — the body has no readable structure to keep (two bodies merged into one, legs fused into one shape, a torso facing two ways at once, a limb with nowhere to attach). Otherwise true.
 If the picture has no visible problem matching the list, set "ok": false.`;
+
+  /**
+   * "Make her the character from <image2>": an attached reference gets its face pasted in as
+   * drawn, so a vision model reads the reference into a design phrase (hair, eyes, face marks,
+   * head accessories) and only those words reach the edit model.
+   */
+  const DESIGN_PROMPT = `You are preparing a text description for an image-EDITING model that will redraw a DIFFERENT picture so its character looks like the character in this picture. The editing model never sees this picture, only your words.
+
+Describe ONLY the character's design, so the character can be recognised when redrawn in another art style and another pose:
+- hair: length, colour, style, bangs/fringe, any ahoge, ponytail, braids, hair accessories
+- eyes: colour and any notable shape
+- face: notable features only (freckles, scars, fang, beauty mark, face markings, ear type such as animal ears)
+- accessories worn on the head, face or neck (headphones, glasses, earrings, choker, horns, halo)
+
+Do NOT describe: clothing, the body, pose, expression, mouth objects, lighting, background, art style, skin tone, names, or the picture itself. No "the character", no "image".
+
+Answer ONLY with JSON: {"design": "one comma-separated phrase, under 60 words, e.g. long silver hair in low twin tails tied with red ribbons, straight-cut bangs, crimson eyes, a small fang, black cat ears", "ok": true}
+If there is no character in the picture, answer {"ok": false}.`;
+
+  /** The edit prompt for a remake: the design in words, everything else kept from <image1>. */
+  function remakePrompt(design) {
+    const d = clean(design).replace(/[.\s]+$/, '');
+    return `Edit <image1>. Redraw the main character with a new hairstyle and face: ${d}. `
+      + 'Draw them in the same art style as <image1>, with the same shading, line art, blush, expression and head angle as the character in <image1>, and the same skin tone on the face as on the body. '
+      + 'Keep the body shape, pose, hand positions, outfit, camera angle, framing, background, lighting and colours of <image1>.';
+  }
+
+  /** A character swap with a reference → { prompt, design, by }, or null to keep the picture reference. Never throws. */
+  async function planRemake(instruction, refs) {
+    const ref = (Array.isArray(refs) ? refs : []).find((r) => r && r.fname);
+    if (!ref || !window.Overseer || !Overseer.isCharacterSwap(instruction)) return null;
+    if (!(await visionAvailable())) {
+      State.addLog('Character remake: no vision model available — sending the reference picture itself (Qwen may paste the face as drawn).', 'warn');
+      return null;
+    }
+    try {
+      const got = await window.ala.files.readAttachment(ref.fname);
+      const mime = (got && got.mime) || ref.mime || 'image/png';
+      const small = window.Pipeline && Pipeline.downscaleForQc ? await Pipeline.downscaleForQc(got.base64, mime) : { base64: got.base64, mime };
+      const r = await U.llmVision(small.base64, small.mime, DESIGN_PROMPT, { role: 'vision', temperature: 0.2 }, 'Character remake: reading the reference');
+      const j = U.extractJson(r && r.text);
+      if (j && (j.ok === false || j.ok === 'false')) throw new Error('it saw no character in the reference');
+      const design = clean(j && j.design).replace(/<\/?image\d*>/gi, '').slice(0, 500);
+      if (design.length < 15) throw new Error('the answer had no usable design text');
+      const by = r && r.provider ? `${r.provider}${r.model ? ` (${r.model})` : ''}` : 'vision model';
+      State.addLog(`Character remake: ${by} read the reference as "${design.slice(0, 160)}"`, 'ok');
+      return { prompt: remakePrompt(design), design, by };
+    } catch (e) {
+      State.addLog(`Character remake: could not read the reference (${String(e && e.message || e).slice(0, 160)}) — sending the reference picture itself.`, 'warn');
+      return null;
+    }
+  }
 
   /** Is any vision model in the chain right now? Never throws. */
   async function visionAvailable() {
@@ -698,7 +769,7 @@ Answer ONLY with JSON: {"prompt": "the full new prompt", "pose": "the pose you c
     return {
       source, prompt: c.editPrompt, label: c.editLabel || '', instruction: c.editInstruction || '',
       fixOf: c.fixOf || null, basePrompt: c.prompt && c.prompt !== c.editPrompt ? c.prompt : null,
-      redoOf: c.id, root: c.editRoot, parentKey: parent.key,
+      redoOf: c.id, root: c.editRoot, parentKey: parent.key, refs: cardRefs(c),
     };
   }
 
@@ -716,7 +787,7 @@ Answer ONLY with JSON: {"prompt": "the full new prompt", "pose": "the pose you c
   window.ImageEdit = {
     FIX_PRESETS, editPrompt, fixPrompt, locationPhrase, regionInstruction, fixInstruction,
     latentSizeOf, nativeSize, sizeWarning, comfyOn, cardRow, queueEdit, queueFix, queueRerender, queueRepair, fixRoute, maybeAutoFix, autoFixTries, noteFixResult,
-    visionAvailable, planFix, plannedFixPrompt, PLAN_PROMPT,
-    historyTree, historyRows, redoSpec, reuseText,
+    visionAvailable, planFix, plannedFixPrompt, PLAN_PROMPT, planRemake, remakePrompt, DESIGN_PROMPT,
+    historyTree, historyRows, redoSpec, reuseText, refSentence, cardRefs, MAX_EDIT_REFS,
   };
 })();

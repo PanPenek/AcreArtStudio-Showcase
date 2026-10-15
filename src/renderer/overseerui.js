@@ -69,6 +69,8 @@
         }
         const att = e.target.closest('[data-ov-att]');
         if (att) { att.classList.toggle('big'); return; }
+        const think = e.target.closest('.ov-think-head');
+        if (think) { think.parentElement.classList.toggle('open'); return; }
         const head = e.target.closest('.ov-tool-head');
         if (head) { head.parentElement.classList.toggle('open'); return; }
         if (e.target.closest('[data-ov]')) this.onStripClick(e);
@@ -469,15 +471,15 @@
         return `<div class="ov-msg user">${pics}<div class="ov-bubble">${esc(m.text)}</div><span class="ov-time">${time}</span></div>`;
       }
       if (m.role === 'agent') {
-        return `<div class="ov-msg agent"><div class="ov-bubble">${esc(m.text).replace(/\n/g, '<br>')}</div><span class="ov-time">${time}</span></div>`;
+        return `<div class="ov-msg agent">${this.thinkHtml(m)}<div class="ov-bubble">${esc(m.text).replace(/\n/g, '<br>')}</div><span class="ov-time">${time}</span></div>`;
       }
       if (m.role === 'note') {
         return `<div class="ov-note ${m.kind === 'err' ? 'err' : ''} ${m.marker ? 'marker' : ''}">${esc(m.text)}</div>`;
       }
       if (m.role === 'tool') {
         let parsed = null;
-        try { parsed = JSON.parse(m.text); } catch { }
-        return `<div class="ov-tool">
+        try { parsed = JSON.parse(m.text); } catch {  }
+        return `<div class="ov-tool-wrap">${this.thinkHtml(m)}<div class="ov-tool">
           <div class="ov-tool-head" title="Click to see exactly what it got back">
             <span class="ov-tool-ico">${this.toolIcon(parsed)}</span>
             <span class="ov-tool-name">${esc(TOOL_VERB[m.tool] || m.tool)}</span>
@@ -485,9 +487,23 @@
           </div>
           ${this.researchHtml(m.tool, parsed)}
           <pre class="ov-tool-body">${esc(m.text)}</pre>
-        </div>`;
+        </div></div>`;
       }
       return '';
+    },
+
+    thinkHtml(m) {
+      const t = String((m && m.thinking) || '').trim();
+      if (!t) return '';
+      const words = t.split(/\s+/).filter(Boolean).length;
+      return `<div class="ov-think">
+        <div class="ov-think-head" title="What the model reasoned before answering — click to show or hide">
+          <span class="ov-think-ico">&#128173;</span><span class="ov-think-name">Thought</span>
+          <span class="ov-think-sum">${words} word${words === 1 ? '' : 's'}</span>
+          <span class="ov-think-toggle">show</span>
+        </div>
+        <pre class="ov-think-body">${esc(t)}</pre>
+      </div>`;
     },
 
     researchHtml(tool, result) {

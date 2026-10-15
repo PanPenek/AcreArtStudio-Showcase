@@ -28,6 +28,7 @@
   let view = null;          // { url, w, h } of the shown checkpoint
   let showDiscarded = false;
   const awaiting = new Map(); // jobId → parent key: auto-select the result if still on its parent
+  let refs = [];
 
   let box = null;           // brushed bbox in source pixels {x,y,w,h}
   let drawing = false;
@@ -58,11 +59,34 @@
       $('#ie-fix').addEventListener('click', (e) => this.fixCurrent(e.currentTarget));
       $('#ie-show-off').addEventListener('click', () => { showDiscarded = !showDiscarded; this.renderHistory(); });
       $('#ie-hist-list').addEventListener('click', (e) => this.onHistoryClick(e));
-      // Drop / paste a picture anywhere on the tab.
+      $('#ie-ref-add').addEventListener('click', () => $('#ie-ref-file').click());
+      $('#ie-ref-file').addEventListener('change', (e) => { this.addRefs([...(e.target.files || [])]); e.target.value = ''; });
+      $('#ie-refs').addEventListener('click', (e) => {
+        const x = e.target.closest('[data-ref-x]');
+        if (x) { refs = refs.filter((r) => r.id !== x.dataset.refX); this.renderRefs(); }
+      });
+      const promptRow = $('#ie-prompt').closest('.ie-prompt-row');
+      const imgFiles = (dt) => [...(dt && dt.files || [])].filter((x) => /^image\//.test(x.type));
+      promptRow.addEventListener('dragover', (e) => { e.preventDefault(); promptRow.classList.add('ie-drop'); });
+      promptRow.addEventListener('dragleave', () => promptRow.classList.remove('ie-drop'));
+      promptRow.addEventListener('drop', (e) => {
+        promptRow.classList.remove('ie-drop');
+        const files = imgFiles(e.dataTransfer);
+        if (!files.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this.addRefs(files);
+      });
+      $('#ie-prompt').addEventListener('paste', (e) => {
+        const items = [...(e.clipboardData && e.clipboardData.items || [])].filter((x) => /^image\//.test(x.type));
+        if (!items.length) return;
+        e.preventDefault();
+        this.addRefs(items.map((x) => x.getAsFile()).filter(Boolean));
+      });
       pane.addEventListener('dragover', (e) => { e.preventDefault(); });
       pane.addEventListener('drop', (e) => {
         e.preventDefault();
-        const f = [...(e.dataTransfer && e.dataTransfer.files || [])].find((x) => /^image\//.test(x.type));
+        const f = imgFiles(e.dataTransfer)[0];
         if (f) this.loadFile(f);
       });
       const typing = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
@@ -130,24 +154,60 @@
       this.select(`card-${card.id}`);
     },
 
+    async saveFile(f, prefix) {
+      if (!f) return null;
+      if (!/^image\/(png|jpeg|webp)$/.test(f.type)) { toast('PNG, JPEG or WebP only.', 'err'); return null; }
+      if (f.size > 20 * 1024 * 1024) { toast('That picture is larger than 20 MB.', 'err'); return null; }
+      const base64 = await new Promise((resolve, reject) => {
+        const rd = new FileReader();
+        rd.onload = () => resolve(String(rd.result).split(',')[1] || '');
+        rd.onerror = () => reject(new Error('could not read the file'));
+        rd.readAsDataURL(f);
+      });
+      return window.ala.files.saveAttachment(base64, f.type, `${prefix}-${f.name || 'upload'}`);
+    },
+
     async loadFile(f) {
       if (!f) return;
-      if (!/^image\/(png|jpeg|webp)$/.test(f.type)) { toast('PNG, JPEG or WebP only.', 'err'); return; }
-      if (f.size > 20 * 1024 * 1024) { toast('That picture is larger than 20 MB.', 'err'); return; }
       try {
-        const base64 = await new Promise((resolve, reject) => {
-          const rd = new FileReader();
-          rd.onload = () => resolve(String(rd.result).split(',')[1] || '');
-          rd.onerror = () => reject(new Error('could not read the file'));
-          rd.readAsDataURL(f);
-        });
-        const saved = await window.ala.files.saveAttachment(base64, f.type, `edit-${f.name || 'upload'}`);
+        const saved = await this.saveFile(f, 'edit');
+        if (!saved) return;
         rootRow = { id: `upload-${U.uid()}`, fname: saved.fname, mime: saved.mime || f.type, name: f.name || 'uploaded picture' };
         rootKey = rootRow.id;
         this.select(rootKey);
       } catch (e) {
         toast('Could not load the picture: ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, ''), 'err');
       }
+    },
+
+    async addRefs(files) {
+      const max = ImageEdit.MAX_EDIT_REFS;
+      for (const f of files || []) {
+        if (refs.length >= max) { toast(`Up to ${max} reference pictures per edit (each adds about 80 s per picture).`, 'err'); break; }
+        try {
+          const saved = await this.saveFile(f, 'ref');
+          if (!saved) continue;
+          refs.push({ id: `ref-${U.uid()}`, fname: saved.fname, mime: saved.mime || f.type, name: String(f.name || 'reference').slice(0, 80) });
+        } catch (e) {
+          toast('Could not attach the reference: ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, ''), 'err');
+        }
+      }
+      this.renderRefs();
+    },
+    setRefs(list) {
+      refs = (Array.isArray(list) ? list : []).slice(0, ImageEdit.MAX_EDIT_REFS).map((r) => ({ ...r }));
+      this.renderRefs();
+    },
+    renderRefs() {
+      const host = $('#ie-refs');
+      if (!host) return;
+      host.hidden = !refs.length;
+      host.innerHTML = refs.map((r, i) => `<div class="ie-ref" title="${esc(r.name)}">
+          <img src="ala://ovr/${esc(r.fname)}" alt="" />
+          <span class="ie-ref-tag">&lt;image${i + 2}&gt;</span>
+          <button class="ie-ref-x" data-ref-x="${esc(r.id)}" title="Remove this reference">✕</button>
+        </div>`).join('')
+        + (refs.length ? `<span class="hint">Reference${refs.length > 1 ? 's' : ''} — say what to take from ${refs.length > 1 ? 'them' : 'it'}, e.g. "give her the face expression from the reference" · +~${80 * refs.length} s per picture</span>` : '');
     },
 
     dims(url) {
@@ -268,7 +328,7 @@
           <div class="ie-row-thumb"><span class="ie-dot"></span></div>
           <div class="ie-row-body">
             <div class="ie-row-title">${esc(j.fixOf ? '🩹 ' : '')}${esc(String(j.editLabel || 'edit').slice(0, 120))}</div>
-            <div class="ie-row-meta">${gen ? 'rendering…' : 'queued'}${parent ? ` · from #${parent.n}` : ''}${j.redoOf ? ' · redo' : ''}</div>
+            <div class="ie-row-meta">${gen ? 'rendering…' : 'queued'}${Array.isArray(j.chatReferences) && j.chatReferences.length > 1 ? ` · 📎 ${j.chatReferences.length - 1}` : ''}${parent ? ` · from #${parent.n}` : ''}${j.redoOf ? ' · redo' : ''}</div>
           </div>
           ${gen ? '' : `<div class="ie-row-acts"><button class="ie-act" data-act="cancel" title="Cancel this edit">✕</button></div>`}
         </div>`;
@@ -278,6 +338,8 @@
       const title = isRoot ? 'Original' : (c && c.editLabel) || 'edit';
       const meta = [];
       if (branchFrom) meta.push(`↳ from #${branchFrom.n}`);
+      const nRefs = ImageEdit.cardRefs(c).length;
+      if (nRefs) meta.push(`📎 ${nRefs} ref${nRefs > 1 ? 's' : ''}`);
       if (c && c.redoOf) { const src = tree.nodes.get(`card-${c.redoOf}`); meta.push(`redo${src && src.n != null ? ` of #${src.n}` : ''}`); }
       if (c && c.qc && c.qc.score != null) meta.push(`QC ${c.qc.score}/10`);
       if (c && c.fixDelta && c.fixDelta.from != null && c.fixDelta.to != null) meta.push(`${c.fixDelta.from}→${c.fixDelta.to}`);
@@ -321,6 +383,7 @@
         const text = ImageEdit.reuseText(n.card);
         if (!text) return;
         if (n.parent) await this.select(n.parent.key, { quiet: true });
+        this.setRefs(ImageEdit.cardRefs(n.card));
         $('#ie-prompt').value = text;
         $('#ie-prompt').focus();
       } else if (act === 'discard') {
@@ -345,7 +408,7 @@
       try {
         const { job } = await ImageEdit.queueEdit({ ...spec, count: 1 });
         awaiting.set(job.id, spec.parentKey);
-        toast(`Redo of #${n.n} queued — same instruction, new seed. Both results are kept.`, 'ok');
+        toast(`Redo of #${n.n} queued — same instruction${spec.refs && spec.refs.length ? ' and references' : ''}, new seed. Both results are kept.`, 'ok');
         this.renderHistory();
       } catch (e) { toast('Could not queue the redo: ' + e.message, 'err'); }
     },
@@ -459,9 +522,21 @@
         const src = this.editSource();
         if (!src) throw new Error('no picture to edit');
         const from = currentKey;
-        const { job } = await ImageEdit.queueEdit({ source: src, prompt: ImageEdit.editPrompt(instruction), label, count, root: rootKey, instruction });
+        let useRefs = refs.slice();
+        let prompt = ImageEdit.editPrompt(instruction, useRefs.length);
+        let remake = null;
+        if (useRefs.length && Overseer.isCharacterSwap(instruction)) {
+          toast('Reading the reference character…', 'ok');
+          remake = await ImageEdit.planRemake(instruction, useRefs);
+          if (remake) { prompt = remake.prompt; useRefs = []; }
+        }
+        const designOf = remake ? { fname: refs[0].fname, name: refs[0].name, design: remake.design } : null;
+        const { job } = await ImageEdit.queueEdit({ source: src, prompt, label, count, root: rootKey, instruction, refs: useRefs, designOf });
         awaiting.set(job.id, from);
-        toast(`Edit queued at the front (${count} picture${count > 1 ? 's' : ''}, about a minute each).`, 'ok');
+        toast(remake
+          ? `Character remake queued (${count} picture${count > 1 ? 's' : ''}, about a minute each): ${remake.design.slice(0, 120)}`
+          : `Edit queued at the front (${count} picture${count > 1 ? 's' : ''}, about ${useRefs.length ? `${Math.round((60 + 80 * useRefs.length) / 6) / 10} min` : 'a minute'} each${useRefs.length ? `, with ${useRefs.length} reference${useRefs.length > 1 ? 's' : ''}` : ''}).`, 'ok');
+        this.setRefs([]);
         this.renderHistory();
         return true;
       } catch (e) {

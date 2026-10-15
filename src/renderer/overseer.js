@@ -78,6 +78,9 @@
     queue_art: [['theme']],
     edit_image: [['instruction'], ['image', 'cardId', 'fromBatch']],
     make_video: [['image', 'cardId', 'fromBatch']],
+    merge_video: [['pictures']],
+    make_comic: [['premise']],
+    revise_comic: [['instruction', 'reroll', 'reletter']],
     web_research: [['query']],
     reorder_queue: [['batchId', 'theme', 'ids', 'order']],
     cancel_queued: [['batchId', 'theme', 'ids']],
@@ -89,9 +92,9 @@
       .map((alts) => alts.join(' or '));
   }
   // Argument keys that are numbers, booleans or lists whatever the model typed.
-  const NUM_KEYS = new Set(['top', 'limit', 'count', 'webLimit', 'imageLimit', 'referenceCount', 'seconds', 'minutes', 'passThreshold', 'maxRetries', 'qcRetries']);
-  const BOOL_KEYS = new Set(['fresh', 'first', 'original', 'skipQc', 'skipMetadata', 'cycleReferences']);
-  const LIST_KEYS = new Set(['ids', 'imageIds', 'referenceImages', 'order']);
+  const NUM_KEYS = new Set(['top', 'limit', 'count', 'webLimit', 'imageLimit', 'referenceCount', 'seconds', 'minutes', 'passThreshold', 'maxRetries', 'qcRetries', 'panels', 'panel', 'takes']);
+  const BOOL_KEYS = new Set(['fresh', 'first', 'original', 'skipQc', 'skipMetadata', 'cycleReferences', 'reroll', 'reletter', 'approveCast', 'sequence', 'plates']);
+  const LIST_KEYS = new Set(['ids', 'imageIds', 'referenceImages', 'order', 'cast']);
 
   /** `queueArt`, `Queue-Art`, `functions.queue_art`, ` queue art ` → `queue_art`. */
   function normalizeToolName(name) {
@@ -253,7 +256,7 @@
       for (const key of ['ok', 'error', 'refused', 'cancelled', 'queued', 'written', 'failed', 'matched', 'idle',
         'researchId', 'promptSetId', 'sourceCount', 'imageCount', 'referenceCount', 'referenceCeiling', 'skipped',
         'attachPerJob', 'cycled', 'perJobReferences', 'cappedBy', 'batchId',
-        'cardId', 'video', 'where', 'lengthSeconds', 'source', 'selfCheck']) {
+        'cardId', 'video', 'where', 'lengthSeconds', 'source', 'selfCheck', 'timeline']) {
         if (value[key] !== undefined) summary[key] = typeof value[key] === 'string' ? value[key].slice(0, 400) : value[key];
       }
       if (Array.isArray(value.sources)) summary.sources = value.sources.slice(0, 6).map((s) => ({
@@ -460,6 +463,27 @@
       args: '{"image": "a1 (his ORIGINAL attachment)", "cardId": "or a library card id (see recentResults)", "fromBatch": "or a batchId from edit_image/queue_art, or latest — waits for that picture to render and uses it", "original": false, "instructions": "optional: what he asked for — action, camera, sound, spoken words and their language", "seconds": "optional clip length in seconds (default 10 when left out); pass the number he asks for, e.g. 20", "prompt": "optional: an exact final video prompt, sent as-is"}',
       what: 'Turn ONE still into a video with sound on the local ComfyUI video workflow (MiniMax H3; the same render as the Convert-to-video button on a Review card; ~2 min at 10 s, blocks this turn). Source: a picture YOU made (the edit, a generated card) is cardId (from recentResults in the state block) or fromBatch (the batchId edit_image/queue_art returned, or "latest"); image: a1… is his UNEDITED original attachment. When an edit of that attachment exists, image is refused unless original:true — he almost always means the edit. seconds sets the clip length. Pass his motion/camera/audio words as instructions and a prompt is written in H3\'s own format, or pass prompt to send exact text. A chat picture becomes a new Review card that carries the clip (and a GIF when auto-GIF is on); a library card gets its clip replaced. The result returns the exact prompt that was sent — quote it when he asks for it. Every clip is then CHECKED automatically (Whisper for speech/language/words, loudness for silence, ffprobe for length, a vision look at 5 frames for camera, on-screen text, action and identity) ; result.selfCheck has the per-check evidence. ONE clip per call: it is not re-rendered automatically — offer a re-render with the fix if a check missed.',
       run: (a) => Overseer.makeVideo(a),
+    },
+    merge_video: {
+      args: '{"pictures": [{"cardId": "library card id", "fromBatch": "or a batchId / latest", "image": "or his attachment a1…", "at": "optional second this picture is reached; omit to space them evenly"}, …at least two, in the order they appear], "seconds": 10, "instructions": "what should change between the pictures", "endOnLast": true}',
+      what: 'Video Merge: ONE clip that goes through TWO OR MORE pictures — it opens on the first, is on each next one at its second (or, for the last, lands on it on the final frame), and the model writes the change between them. Use this for "merge these", "make a video from A to B", "go from this picture to that one". Same ComfyUI video workflow as make_video (~2 min per 10 s, blocks this turn); the clip becomes a new card in Review (and is listed in the Video Merge tab). To go from a picture to an EDIT of it: edit_image first, then pictures: [{cardId: <original>}, {fromBatch: <the edit batch>}]. No self-check is run on a merge, so do not claim any detail of the result you have not been told.',
+      run: (a) => Overseer.makeMergeVideo(a),
+    },
+    make_comic: {
+      args: '{"premise": "what happens, in his words", "panels": 4, "format": "page|webtoon|story", "cast": ["one entry per character: Name: ids — ids are his attachments (a1), library cardIds or web_research images (i1 i3, taken from the research about that character; i1@researchId to name another); e.g. Mira: i1 i3. Add asis to use his own picture directly as the sheet. Leave out to have the cast drawn from words"], "researchId": "the web_research the i-ids come from; latest if omitted", "takes": 2, "title": "optional", "theme": "optional", "pageStyle": "classic|tight|bleed|manga|rounded|dots", "lettering": "balloons|float", "sequence": false, "plates": true, "approveCast": false}',
+      what: 'Make a whole lettered COMIC: a comic page (default), a vertical webtoon strip, or an illustrated story (one picture + prose). One call does everything in the background on the normal queue: a storyboard, a clean cast sheet per character — drawn FROM the reference pictures in cast when given (and checked against them), every panel drawn on ComfyUI with the cast sheet attached so it is the same person in every panel, an empty background per place that two panels share (attached so the place stays the same), a vision pick of the best take (right person, right place, nobody drawn twice), the words written by a vision model AFTER looking at the drawn panels, balloons placed off the faces, and the finished page lands in Review (nothing is posted). Takes a few minutes (~15-25 s per render, panels × takes renders). Returns a projectId for comic_status / revise_comic. Use this for "make a comic / manga page / webtoon / comic strip about …". Never use queue_art for a comic. pageStyle: classic (white gutters), tight (no white bars, thin lines), bleed (pictures touch, no lines), manga, rounded (soft cards on a pastel gradient), dots (bold frames on a polka-dot page). lettering: balloons, or float = coloured hand-lettered words with no balloons. sequence:true = a step-by-step sequence: one framing, every panel the next stage of a change, laid out side by side.',
+      run: (a) => Overseer.makeComic(a),
+    },
+    revise_comic: {
+      args: '{"projectId": "latest if omitted", "panel": 2, "instruction": "what to change in that panel, in his words", "reroll": false, "reletter": false}',
+      what: 'Change a comic that make_comic made: instruction = an EDIT of one panel\'s picture in words ("panel 3: add a red scarf"); reroll:true = draw that panel again from scratch; reletter:true (no panel) = rewrite all captions/dialogue from the pictures again. The page in Review is updated afterwards. Nothing is posted.',
+      run: (a) => Overseer.reviseComic(a),
+    },
+    comic_status: {
+      args: '{"projectId": "latest if omitted"}',
+      reads: true,
+      what: 'Where a comic from make_comic is: phase (storyboard, cast, panels, lettering, done), each panel\'s state, errors, and the Review card id of the finished page.',
+      run: (a) => Overseer.comicStatus(a),
     },
     worker: {
       args: '{"action": "start|stop"}',
@@ -1051,10 +1075,34 @@
      * from a theme and appends the house tail, which asks the model for a fresh picture "inspired
      * by" the reference — that is why…
      */
-    editPrompt(instruction) {
-      const change = String(instruction || '').trim().replace(/\s+/g, ' ')
-        .replace(/(?:[.\s]*\bchange nothing else)+[.\s]*$/i, '').replace(/[.\s]+$/, '');
-      return `Edit <image1>. Keep the character in <image1> exactly the same: same face and expression, hair, body shape, pose, hand positions, camera angle, framing and background. ${change.charAt(0).toUpperCase()}${change.slice(1)}. Change nothing else. Keep the same art style, lighting and colours as <image1>.`;
+    editPrompt(instruction, refCount = 0) {
+      const change = this.editRefTags(String(instruction || '').trim().replace(/\s+/g, ' ')
+        .replace(/(?:[.\s]*\bchange nothing else)+[.\s]*$/i, '').replace(/[.\s]+$/, ''));
+      if (this.isCharacterSwap(change)) {
+        const tag = (/<image([2-9])>/.exec(change) || [])[0] || (refCount > 0 ? '<image2>' : '');
+        const who = tag
+          ? `the character from ${tag}: give them the face, eyes, hairstyle and hair colour of the character in ${tag}`
+          : 'the character described below, with a new face, eyes, hairstyle and hair colour';
+        return `Edit <image1>. Replace the character in <image1> with ${who}. Keep the body shape, pose, hand positions, camera angle, framing and background of <image1>. ${change.charAt(0).toUpperCase()}${change.slice(1)}. Keep the same art style, lighting and colours as <image1>.`;
+      }
+      const faceChange = /\b(?:express\w*|fac(?:e|ial)|smil\w*|grin\w*|frown\w*|pout\w*|blush\w*|wink\w*|mouth|lips?|eyes?|tongue|cry\w*|tears?|look(?:s|ing)? (?:angry|happy|sad|shocked|surprised|scared|smug|bored|shy))\b|[:;]-?[3DPpOo)(]|\bxd\b|\buwu\b|\bowo\b/i.test(change);
+      return `Edit <image1>. Keep the character in <image1> exactly the same: ${faceChange ? 'same facial identity' : 'same face and expression'}, hair, body shape, pose, hand positions, camera angle, framing and background. ${change.charAt(0).toUpperCase()}${change.slice(1)}. Change nothing else. Keep the same art style, lighting and colours as <image1>.`;
+    },
+
+    /** "image2", "pic 3" → <image2>, the tag the edit model reads. */
+    editRefTags(text) {
+      return String(text || '').replace(/(?<![<\w])(?:image|img|picture|pic|photo)\s?#?([1-9])\b(?!>)/gi, '<image$1>');
+    },
+
+    /** Does the instruction ask to put another character in place of the one in <image1>? */
+    isCharacterSwap(text) {
+      const t = this.editRefTags(text);
+      const who = '(?:characters?|person|people|girl|boy|guy|man|woman|subject|protagonist)';
+      const det = '(?:(?:the|her|his|this|that|main|both|original|current|two)\\s+)*';
+      return new RegExp(`\\b(?:swap|switch|replace|exchange)\\w*\\s+${det}${who}\\b`, 'i').test(t)
+        || new RegExp(`\\b(?:instead|in place)(?:\\s+of)?\\s+${det}(?:${who}|her|him)\\b`, 'i').test(t)
+        || new RegExp(`<image[2-9]>(?:'s)?\\s+${who}\\b`, 'i').test(t) && /\b(?:put|use|place|insert|paste|swap|switch|replace|instead|into)\b/i.test(t)
+        || /\b(?:turn|make|change)\s+(?:her|him|them|the (?:character|person|girl|boy|guy|man|woman))\s+(?:into|look like|to)\s+(?:the (?:character|person|girl|boy|guy|man|woman) (?:from|in)\s+)?<image[2-9]>/i.test(t);
     },
 
     async editImage({ image, instruction = '', count = 1, first = true } = {}) {
@@ -1683,6 +1731,250 @@
     },
 
     /** The pipeline dials the artist asks for by name — "be less strict", "turn QC off". */
+    /** A comic project by id, or the newest one. */
+    comicProject(projectId) {
+      if (!window.Comics) return null;
+      const id = String(projectId || '').trim();
+      if (id && id !== 'latest') return Comics.get(id);
+      return (Comics.data.projects || [])[0] || null;
+    },
+
+    /** make_comic: create a comic project from his premise and start it in the background. */
+    async makeComic({ premise = '', panels = 4, format = 'page', cast = [], takes = 2, title = '', theme = '', approveCast = false,
+      researchId = '', pageStyle = 'classic', lettering = 'balloons', sequence = false, plates = true } = {}) {
+      if (this._abort) return cancelled();
+      const noGen = this.generationRefusal();
+      if (noGen) return noGen;
+      if (!window.Comics) return { ok: false, error: 'the comics module is not loaded' };
+      const g = (State.settings && State.settings.gen) || {};
+      if (g.engine !== 'comfy') return { ok: false, error: 'comics need the ComfyUI engine with the Qwen-Image 2.1 reference workflow (Settings → Generation); Perchance cannot keep a character consistent' };
+      const text = String(premise || '').trim();
+      if (!text) return { ok: false, error: 'make_comic needs a premise — what happens in the comic?' };
+      const resolved = await this.comicCastPictures(cast, researchId);
+      if (resolved.error) return { ok: false, error: resolved.error, ...(resolved.extra || {}) };
+      const castRefs = resolved.cast;
+      const fmt = ['page', 'webtoon', 'story'].includes(format) ? format : 'page';
+      let project;
+      try {
+        project = Comics.create({
+          name: String(title || '').slice(0, 60), format: fmt, premise: text, theme: String(theme || ''),
+          panels: clamp(panels || 4, 1, 8), takes: clamp(takes || 2, 1, 4), castRefs, approveCast: !!approveCast,
+          pageStyle: String(pageStyle || 'classic'), lettering: lettering === 'float' ? 'float' : 'balloons',
+          sequence: !!sequence, plates: plates !== false,
+        });
+        if (title) project.titleManual = true;
+        Comics.start(project);
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
+      log(`Overseer started a comic: "${text.slice(0, 80)}".`, 'ok');
+      return {
+        ok: true, queued: 1, projectId: project.id, format: fmt, panels: project.panelCount, takes: project.takes,
+        cast: castRefs.map((c) => ({ name: c.name || '(the writer names them)', references: c.refs.map((r) => r.source), usedAsIs: !!c.asIs })),
+        warnings: resolved.warnings.length ? resolved.warnings : undefined,
+        pageStyle: project.pageStyle, lettering: project.letter.mode, sequence: project.sequence,
+        note: `Comic started in the background (Comics tab): storyboard → ${castRefs.length ? 'cast sheets drawn from the reference pictures' : 'cast sheets'}${project.plates && !project.sequence ? ' + a background per place used twice' : ''} → ${project.panelCount} panel(s) × ${project.takes} take(s) on the queue → vision lettering → the page lands in Review. Nothing is posted. It takes a few minutes; comic_status with this projectId reports progress.`
+          + (approveCast ? ' It stops after the cast sheets until he approves them in the Comics tab.' : ''),
+      };
+    },
+
+    /** Turn his cast entries ("Name: a1 i3") into saved reference pictures per character. */
+    async comicCastPictures(cast, researchId = '') {
+      const out = [];
+      const warnings = [];
+      const list = (Array.isArray(cast) ? cast : cast ? [cast] : []).slice(0, 4);
+      for (const raw of list) {
+        let name = '';
+        let ids = [];
+        let asIs = false;
+        if (raw && typeof raw === 'object') {
+          name = String(raw.name || '').trim();
+          ids = [...(Array.isArray(raw.refs) ? raw.refs : []), ...(Array.isArray(raw.images) ? raw.images : []), raw.image, raw.id].filter(Boolean).map(String);
+          asIs = !!(raw.asIs || raw.asis);
+        } else {
+          let t = String(raw || '').trim();
+          if (!t) continue;
+          const m = /^([^:]{1,40}):\s*(.+)$/.exec(t);
+          if (m && !/^(card|research)-/i.test(t)) { name = m[1].trim(); t = m[2]; }
+          if (/\bas[- ]?is\b/i.test(t)) { asIs = true; t = t.replace(/\bas[- ]?is\b/ig, ' '); }
+          ids = t.split(/[\s,;]+/).filter(Boolean);
+        }
+        const refs = [];
+        for (const id of ids.slice(0, 4)) {
+          try {
+            refs.push(await this.comicPicture(id, researchId, name));
+          } catch (e) {
+            if (e.fatal) return { error: e.message, extra: e.extra };
+            warnings.push(`${id}: ${e.message}`);
+          }
+        }
+        if (!refs.length) {
+          if (ids.length) return { error: `no usable picture for ${name || 'the character'} (${warnings.join('; ') || ids.join(', ')})` };
+          continue;
+        }
+        out.push({ name, refs, asIs: asIs && refs.length > 0 });
+      }
+      return { cast: out, warnings };
+    },
+
+    async comicPicture(id, researchId = '', who = '') {
+      const fail = (msg, fatal = false, extra = null) => { const e = new Error(msg); e.fatal = fatal; e.extra = extra; return e; };
+      if (/^a\d+$/i.test(id)) {
+        const rows = this.chatReferenceRows([id]);
+        if (rows.error) throw fail(rows.error, true, { availableImageIds: rows.availableImageIds });
+        const row = rows.rows[0];
+        const got = await window.ala.files.readAttachment(row.fname);
+        const saved = await window.ala.files.saveImage(got.base64, U.extFromMime(got.mime || row.mime || 'image/png'), 'comic-star');
+        return { fname: saved.fname, url: saved.url, source: `attachment ${id}` };
+      }
+      const at = /^(i\d+)@(.+)$/i.exec(id);
+      if (at) { id = at[1]; researchId = at[2]; }
+      if (/^i\d+$/i.test(id)) {
+        const rows = Array.isArray(this.research) ? this.research : [];
+        const n = String(who || '').trim().toLowerCase();
+        const byName = !researchId && n ? [...rows].reverse().find((r) => {
+          const q = String(r.query || '').toLowerCase();
+          return q.includes(n) || n.split(/\s+/).some((part) => part.length > 2 && q.includes(part));
+        }) : null;
+        const pack = byName || this.researchPack(researchId);
+        const im = pack && (pack.images || []).find((x) => String(x.id) === id);
+        if (!im) throw fail(`no researched image ${id}${pack ? ` in ${pack.id}` : ' — run web_research first'}`, true, { researchImageIds: ((pack && pack.images) || []).map((x) => x.id) });
+        if (!window.ala.research || !window.ala.research.image) throw fail('the web research bridge is not loaded', true);
+        const got = await window.ala.research.image({ imageUrl: im.imageUrl, thumbnailUrl: im.thumbnailUrl, sourceUrl: im.sourceUrl });
+        if (!got || !got.ok || !got.base64) throw fail(got && got.error ? got.error : 'the image could not be downloaded');
+        const saved = await window.ala.files.saveImage(got.base64, U.extFromMime(got.mime || 'image/jpeg'), 'comic-ref');
+        return { fname: saved.fname, url: saved.url, source: `web ${id}: ${String(im.title || '').slice(0, 60)}` };
+      }
+      const card = (State.library || []).find((c) => c && (c.id === id || `card-${c.id}` === id));
+      if (!card || !card.fname) throw fail(`no attached picture, researched image or library card called ${id}`, true);
+      return { fname: card.fname, url: card.url, source: `card ${card.id}` };
+    },
+
+    reviseComic({ projectId = '', panel = 0, instruction = '', reroll = false, reletter = false } = {}) {
+      if (this._abort) return cancelled();
+      const project = this.comicProject(projectId);
+      if (!project) return { ok: false, error: 'there is no comic yet — make_comic first' };
+      if (reletter && !panel) {
+        project.lettered = false;
+        project.run = { ...project.run, active: true, error: null };
+        project.autoSend = true;
+        Comics.persist();
+        Comics.kick(project);
+        return { ok: true, projectId: project.id, note: 'Re-lettering the page from the pictures; the Review card is updated after. Nothing is posted.' };
+      }
+      const n = Math.round(Number(panel));
+      const p = project.panels.find((x) => x.n === n);
+      if (!p) return { ok: false, error: `the comic has panels 1-${project.panels.length}; name one with panel` };
+      const noGen = this.generationRefusal();
+      if (noGen) return noGen;
+      project.autoSend = true;
+      try {
+        if (reroll || !String(instruction || '').trim()) Comics.reroll(project, p);
+        else Comics.revise(project, p, instruction);
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
+      return {
+        ok: true, queued: 1, projectId: project.id, panel: n, mode: reroll ? 'reroll' : 'edit',
+        note: `Panel ${n} ${reroll ? 'is being drawn again' : 'is being edited'}; then the page is re-lettered and the Review card updated. Nothing is posted.`,
+      };
+    },
+
+    comicStatus({ projectId = '' } = {}) {
+      const project = this.comicProject(projectId);
+      if (!project) return { ok: false, error: 'there is no comic yet' };
+      return { ok: true, ...Comics.status(project) };
+    },
+
+    /** merge_video: one clip through two or more pictures, kept as a new Review card. */
+    async makeMergeVideo({ pictures, seconds = 10, instructions = '', prompt = '', endOnLast = true, aspect = 'auto' } = {}) {
+      const refused = this.generationRefusal();
+      if (refused) return refused;
+      if (!window.ComfyDriver || !window.ComfyUI || !window.VideoMerge) return { ok: false, error: 'the Video Merge engine is not loaded' };
+      if (!(State.settings && State.settings.comfy && State.settings.comfy.videoWorkflow)) return { ok: false, error: 'no video workflow is set — pick one in Settings → Generation (Local image generation)' };
+      const list = (Array.isArray(pictures) ? pictures : []).map((p) => (typeof p === 'string' ? { cardId: p } : p)).filter(Boolean);
+      const VM = window.VideoMerge;
+      if (list.length < VM.MIN_PICTURES) return { ok: false, error: `a merge needs at least ${VM.MIN_PICTURES} pictures — pictures: [{cardId…}, {cardId…}]`, recentResults: this.recentResults() };
+      if (list.length > VM.MAX_PICTURES) return { ok: false, error: `at most ${VM.MAX_PICTURES} pictures in one clip` };
+      const secs = Number(seconds);
+      if (!(secs > 0)) return { ok: false, error: `seconds must be a positive number, got "${seconds}"` };
+      const land = endOnLast !== false;
+
+      const got = [];
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        const cardArg = String(p.cardId || '').trim(), batchArg = String(p.fromBatch || '').trim(), imageArg = String(p.image || '').trim();
+        if (!cardArg && !batchArg && !imageArg) return { ok: false, error: `picture ${i + 1}: name it with cardId, fromBatch or image`, availableImageIds: this.chatImages().map((a) => a.id), recentResults: this.recentResults() };
+        if (imageArg && !cardArg && !batchArg) {
+          const found = this.chatReferenceRows([imageArg]);
+          if (found.error) return { ok: false, error: `picture ${i + 1}: ${found.error}`, availableImageIds: found.availableImageIds };
+          const att = this.chatImages().find((a) => a.id === found.rows[0].id);
+          const r = await window.ala.files.readAttachment(att.fname);
+          got.push({ base64: r.base64, mime: r.mime || att.mime || 'image/png', w: att.w || 0, h: att.h || 0, at: p.at,
+            src: { kind: 'file', fname: att.fname, url: `ala://ovr/${att.fname}`, name: String(att.name || att.id).slice(0, 60) }, label: `his attachment ${att.id}` });
+          continue;
+        }
+        let card = null;
+        if (cardArg) {
+          card = (State.library || []).find((c) => c && c.id === cardArg) || null;
+          if (!card || !card.fname) return { ok: false, error: `picture ${i + 1}: no library card with id ${cardArg}` };
+        } else {
+          const bid = batchArg.toLowerCase() === 'latest' ? this.latestBatchId() : batchArg;
+          if (!bid) return { ok: false, error: `picture ${i + 1}: there is no batch yet to take a picture from` };
+          const b = await this.awaitBatchCards(bid);
+          if (b.cancelled) return cancelled();
+          if (b.error) return { ok: false, error: `picture ${i + 1}: ${b.error}` };
+          if (b.cards.length > 1) return { ok: false, error: `picture ${i + 1}: batch ${bid} made ${b.cards.length} pictures — pass cardId for the one he means`, cards: b.cards.slice(0, 12).map((c) => ({ cardId: c.id, what: String(c.theme || '').slice(0, 60) })) };
+          card = b.cards[0];
+        }
+        const base64 = await window.ala.files.readImageBase64(card.fname);
+        got.push({ base64, mime: card.mime || 'image/png', w: Number(card.width) || 0, h: Number(card.height) || 0, at: p.at,
+          src: { kind: 'card', id: card.id, fname: card.fname, url: card.url, name: (card.metadata && card.metadata.title) || card.fname }, label: `card ${card.id}` });
+      }
+
+      const even = VM.defaultTimes(got.length, secs, land);
+      const frames = got.map((g, i) => {
+        const given = Number(g.at);
+        const at = i === 0 ? 0 : (land && i === got.length - 1) ? 'end' : (g.at != null && g.at !== '' && Number.isFinite(given) ? given : even[i]);
+        return { ...g, at };
+      });
+      const chk = VM.check(frames, secs, land);
+      if (!chk.ok) return { ok: false, error: chk.error };
+      const timeline = VM.describe(frames, land);
+
+      const direction = String(instructions || '').trim().slice(0, 2000);
+      let text = String(prompt || '').trim();
+      if (!text) {
+        const written = await window.ComfyUI.writeMergePrompt({
+          frames: frames.map((f) => ({ base64: f.base64, mime: f.mime, at: f.at })),
+          userText: direction, mode: direction ? 'hybrid' : 'auto', seconds: secs,
+        });
+        text = written.prompt;
+      }
+      const t0 = Date.now();
+      log(`Overseer: merging ${frames.length} pictures (${timeline})…`, 'comfy');
+      const res = await new window.ComfyDriver(State.settings).convertToVideo({
+        base64: frames[0].base64, mime: frames[0].mime, prompt: text, seconds: secs,
+        frames: frames.slice(1).map((f) => ({ base64: f.base64, mime: f.mime, at: f.at })),
+        aspect: aspect || 'auto', size: { w: frames[0].w, h: frames[0].h }, nameHint: 'merge',
+        log: (m) => log(m, 'comfy'),
+      });
+      let card = null;
+      if (window.VideoMergeUI && window.VideoMergeUI.record) {
+        card = await window.VideoMergeUI.record({
+          res, prompt: text, seconds: secs, aspect: aspect || 'auto', landEnd: land,
+          frames: frames.map((f) => ({ src: f.src, at: f.at, w: f.w, h: f.h })),
+          poster: { base64: frames[0].base64, mime: frames[0].mime },
+        });
+      }
+      return {
+        ok: true, video: res.fname, cardId: card ? card.id : null, sizeMB: +(res.size / 1048576).toFixed(1), gif: !!res.gif, lengthSeconds: secs,
+        seconds: Math.round((Date.now() - t0) / 1000), where: card ? 'a NEW card in Review (also in the Video Merge tab)' : 'Video Merge tab', timeline,
+        source: frames.map((f, i) => `${String.fromCharCode(65 + i)} = ${f.label}`).join(', '),
+        prompt: text.slice(0, 4000),
+      };
+    },
+
     async changePipeline(a = {}) {
       const cur = () => {
         const g = (State.settings && State.settings.gen) || {};
@@ -1853,6 +2145,12 @@ PICTURES HE ATTACHES
 - "Make a video of this", "animate it", "turn it into a clip" → make_video and his motion words as instructions. WHICH picture: one you made ("that generated image", "the edit", "it" right after an edit) → cardId from recentResults, or fromBatch with the batchId edit_image/queue_art returned; "edit this and make a video of it" in one message → edit_image, then make_video with fromBatch = that batchId (it waits for the edit). image: a1 is ONLY his unedited original. The app DOES make videos with sound: never answer that it only makes stills. "Longer/shorter/20 seconds" → the seconds argument; the length IS adjustable, default 10 s. Pass the number he asks for (20 s works in one render); never refuse or shorten a length request.
 - The video model (MiniMax H3) has NO negative prompt: it reads "no zoom, no voice, no Japanese" as zoom, voice, Japanese. When you write or rewrite a video prompt yourself, say only what IS there: "the camera holds a static shot", "she (S1) says: <d>[English] …</d>", "overall_soundscape: soft ambient sound only", "non_diegetic_music: N/A". If the result still misses something, re-render with a more precise positive description — do not blame the model or the workflow before you have tried that.
 - After make_video, report from result.selfCheck, not from the prompt you wrote: say which checks passed (✓), which missed (✗) and which could not be checked (?), with the evidence (\"Whisper heard Japanese: …\", \"frame 9.8 s is waist-up, 0.1 s was full-body\"). Never tell him the camera stayed static, the voice was English or there is no text unless that check is ✓. Also say which picture the clip was made from (result.source). One request = one clip: if a check is ✗, say so plainly and offer a re-render with the positive rewording; do not re-render unasked.
+- "Merge these", "video from A to B", "from this one to that one", any video through 2+ pictures → merge_video (NOT make_video, which animates ONE picture). "at" sets the second each picture is reached; leave it out to space them evenly; endOnLast:true (default) makes the clip end exactly on the last picture. The result has no self-check: report result.timeline and say where the clip is (result.where — normally a new card in Review); never describe what it looks like.
+
+COMICS
+COMICS
+- "Make a comic / manga page / webtoon / comic strip about …" → make_comic with his premise in his words (panels and format if he says). CHARACTERS: when he attached them, cast ["Name: a1"]. When the comic stars EXISTING characters (anime, game, film, a named OC from the library), get pictures first: web_research kind="character" per character, then pass 1-2 clean images of each — one person alone, full body or clear face, no group shots, no text/collage — as cast ["Mira: i2 i5", "Bolt: i1"] with researchId; a character with no good picture is drawn from words. A detailed premise (a chapter adaptation) should spell out each character's look and the panel beats. A step-by-step change shown in one framing → sequence:true (lettering:"float" for hand-lettered words). Ask nothing he already decided; default pageStyle classic. One call runs the whole thing in the background; report the projectId and that the page lands in Review — never claim panels or dialogue you have not been told about. Never build a comic with queue_art.
+- "Change panel 3 …" → revise_comic with panel and his instruction; "redo panel 2" → reroll:true; "rewrite the dialogue" → reletter:true. "How is the comic going?" → comic_status.
 
 ${unattended
     ? `THIS IS AN UNATTENDED RUN. Nobody is watching and nobody will answer a question. Do not ask one — decide, act, and report what you did. Work against the standing brief. If the brief is empty, do not generate anything: sync the numbers, say what changed, and finish.
@@ -2092,10 +2390,11 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
       const t = String(text || '').trim().toLowerCase().replace(/[\s\\/;:'"`~|]+$/, '');
       if (!t) return false;
       if (/^(?:(?:yes|yeah|yep|yup|ye|ya|sure|ok(?:ay)?|k|go(?: ahead)?|do it|please(?: do)?|sounds good|queue (?:it|them)|make (?:it|them))\b[\s!.,]*)+$/.test(t)) return true;
-      if (/\b(don['’]?t|do not|never|stop|no more)\s+(\w+\s+){0,2}(generat|queue|make|making|render|creat|draw|edit)/.test(t)) return false;
+      if (/\b(don['’]?t|do not|never|stop|no more)\s+(\w+\s+){0,2}(generat|queue|make|making|render|creat|draw|edit|merg|combin|swap|replac|put|turn)/.test(t)) return false;
       // A picture attached with "use that as a reference / like this / this character" is a
       // request for pictures of it.
       if (attachments > 0 && /\b(ref\w*|use (?:this|that|it|these|those|them|her|him)|like (?:this|that|these)|this (?:character|girl|guy|one|style|outfit)|same (?:character|girl|guy|style|outfit)|based on)\b/.test(t)) return true;
+      if (attachments > 0 && /\b(merg\w*|combin\w*|fus(?:e|ing)|swap\w*|switch\w*|replac\w*|(?:put|place|insert|turn|transform)\w*\s+(?:\S+\s+){0,8}?into)\b/.test(t)) return true;
       return /\b(generat\w*|queue\w*|make|making|render\w*|creat\w*|draw\w*|produce|batch|edit\w*|do (?:one|it|another|that)|more (of|like)|(\d+|one|a few|some) more|another|again|redo|recreate|research|look up|find references|write \d*\s*prompts?|prompts? for|pictures?|images?|art(work)?|pics?|variations?|animat\w*|videos?|clips?|repair\w*)\b/.test(t)
         // "fix the last batch / fix them / fix those" — fix_images.
         || /\bfix\w*\s+(?:(?:the|my|all|last|latest|recent\w*|new\w*|those|these|them|that|it|\d+)\s+){0,4}(?:batch\w*|images?|pictures?|pics?|cards?|ones?|them|those|these|renders?|generations?)\b/.test(t);
@@ -2161,6 +2460,7 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
             run.tokens.out += reply.usage.out;
             run.tokens.cached += reply.usage.cached;
           }
+          let stepThinking = reply.thinking || '';
           if (this._abort) break;
           if (reply.needsRepair && !repairUsed && i + 1 < steps) {
             // Looked like a tool call but could not be read: one hidden correction per turn.
@@ -2170,7 +2470,7 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
           }
           if (reply.say) {
             run.summary = reply.say;
-            if (reply.say !== lastSay) { this.push('agent', reply.say); lastSay = reply.say; }
+            if (reply.say !== lastSay) { this.push('agent', reply.say, stepThinking ? { thinking: stepThinking } : {}); lastSay = reply.say; stepThinking = ''; }
           }
           if (!reply.tool) {
             // "I've approved c1 and c2" with no tool run in the whole turn: an action that
@@ -2248,7 +2548,8 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
               if (result && result.ok !== false && !result.error && !result.refused) progressed = true;
             }
             if (Object.keys(argNote).length && result && typeof result === 'object' && !Array.isArray(result)) result = { ...result, ...argNote };
-            this.push('tool', resultText(result), { tool: call.name, args, ...(call.repaired ? { repaired: true } : {}) });
+            this.push('tool', resultText(result), { tool: call.name, args, ...(stepThinking ? { thinking: stepThinking } : {}), ...(call.repaired ? { repaired: true } : {}) });
+            if (stepThinking) stepThinking = '';
           }
           stalled = progressed ? 0 : stalled + 1;
           if (stalled >= STALL_LIMIT) {
@@ -2359,6 +2660,7 @@ UPLOADS: only if he asked for one in this message, and only through the gate —
           calls,
           done: !calls.length,
           usage,
+          thinking: String(res.reasoning || '').trim(),
           native: res.nativeTools === true,
         };
       };

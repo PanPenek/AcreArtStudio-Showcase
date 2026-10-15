@@ -134,7 +134,7 @@ The example is here to show you HOW to write, not WHAT to write. Somebody readin
     wild: {
       label: 'Wildcard',
       rule: `Nothing is carried over from what has worked before except the way the artist writes. Invent the scene from the theme alone: a subject, a situation and a setting that appear nowhere in the example and are not the obvious first idea for this theme.
-Keep the form exactly — comma-separated fragments, subject first, tags last. The gamble is in the content. The voice is not the thing being gambled.`,
+Keep the form the requirements below ask for. The gamble is in the content. The voice is not the thing being gambled.`,
     },
   };
 
@@ -200,6 +200,7 @@ ${(skeleton.missingSlots || []).length ? `- the example leaves these empty; leav
         .map((s) => String(s || '').trim()).filter(Boolean);
       if (!list.length) throw new Error('no example prompt given');
       const m = MODES[mode] || MODES.similar;
+      const arm = window.PromptStyle && PromptStyle.pickArm ? PromptStyle.pickArm() : null;
 
       const skeletonBlock = this.skeletonBlock(skeleton);
 
@@ -214,8 +215,9 @@ MODE: ${m.label}
 ${m.rule}
 
 Write ${n} prompts. Hard requirements:
-- Match the example's writing style, clause structure, and level of detail. If the example is a comma-separated tag list, write tag lists. If it is prose, write prose.
-- Whatever the example's voice, never open by naming the medium — "anime illustration", "digital art of", "an image of". The first words are the ones the generator weights hardest and they belong to the subject.
+${window.PromptStyle && PromptStyle.prose && PromptStyle.prose()
+  ? `- Keep the example's content, intensity and level of detail, but write it for THIS generator — its tag form was for an older one:\n${PromptStyle.proseRules(arm || 'action').map((r) => `- ${r}`).join('\n')}\n`
+  : `- Match the example's writing style, clause structure, and level of detail. If the example is a comma-separated tag list, write tag lists. If it is prose, write prose.\n`}- Whatever the example's voice, never open by naming the medium — "anime illustration", "digital art of", "an image of". The first words are the ones the generator weights hardest and they belong to the subject.
 - Each prompt describes ONE scene and stays within ±25% of the example's length.
 - Be clear and specific — vagueness produces generic images.
 - No numbering, no commentary, no explanation of your choices.
@@ -223,11 +225,11 @@ ${extra ? `- ${extra}\n` : ''}
 Respond ONLY with a JSON array of strings: ["prompt1", "prompt2", ...]`;
       };
 
-      return this.ask(build, { count, temperature: mode === 'variations' ? 0.85 : 1.0 });
+      return this.ask(build, { count, temperature: mode === 'variations' ? 0.85 : 1.0, arm });
     },
 
     /** Send a written instruction to the text chain and parse a prompt list back. */
-    async ask(build, { count = 6, temperature = 1.0, rounds = 2 } = {}) {
+    async ask(build, { count = 6, temperature = 1.0, rounds = 2, arm = null } = {}) {
       const write = typeof build === 'function' ? build : () => build;
       const kept = [];
       let dropped = 0;
@@ -256,6 +258,7 @@ Respond ONLY with a JSON array of strings: ["prompt1", "prompt2", ...]`;
         if (kept.length === before) break;
       }
 
+      if (arm && kept.length && window.PromptStyle && PromptStyle.noteArm) PromptStyle.noteArm(kept, arm);
       if (!kept.length) {
         throw new Error(last && (last.truncated || last.fromReasoning)
           ? `${(last && last.provider) || 'the writer'} spent its whole token budget thinking and never wrote a prompt`
@@ -451,11 +454,12 @@ Respond ONLY with JSON:
         .map((t) => String(t).trim()).filter(Boolean))].slice(0, 12);
       const withPrompts = list.filter((b) => b.knownPrompt).length;
 
-      const house = window.PromptStyle ? PromptStyle.block() : '';
+      const arm = window.PromptStyle && PromptStyle.pickArm ? PromptStyle.pickArm() : null;
+      const house = window.PromptStyle ? PromptStyle.block({ arm: arm || 'action' }) : '';
       const p = window.PromptStyle ? PromptStyle.profile() : { enough: false };
-      const lengthRule = p.enough
-        ? `${p.lo}-${p.hi} words each, in comma-separated fragments — that is this artist's measured range.`
-        : '40-90 words each.';
+      const lengthRule = window.PromptStyle && PromptStyle.lengthRule ? PromptStyle.lengthRule(p)
+        : p.enough ? `${p.lo}-${p.hi} words each, in comma-separated fragments — that is this artist's measured range.`
+          : '40-90 words each.';
 
       const build = (n, have) => {
         const dodge = [...have, ...avoid];
@@ -472,8 +476,8 @@ ${m.rule}
 Write ${n} prompts. Hard requirements:
 - Each prompt describes ONE scene and stands alone — the generator never sees the reference images, only your words, so anything that matters must be written out.
 - ${lengthRule}
-- Write generator input, not a caption. Never open with the medium ("anime illustration", "digital art of", "an image of", "a portrait of") and never narrate — no "she feels", no "as if", no sentences about what is happening to her. Open with the subject and what is being done to it, then tags, then the render and quality tokens.
-- Carry the references' rendering style and lighting logic into every prompt.
+${window.PromptStyle && PromptStyle.prose && PromptStyle.prose() ? PromptStyle.proseRules(arm || 'action').map((r) => `- ${r}`).join('\n') + '\n' : `- Write generator input, not a caption. Never open with the medium ("anime illustration", "digital art of", "an image of", "a portrait of") and never narrate — no "she feels", no "as if", no sentences about what is happening to her. Open with the subject and what is being done to it, then tags, then the render and quality tokens.
+`}- Carry the references' rendering style and lighting logic into every prompt.
 - Be clear and specific — vagueness produces generic images.
 - No numbering, no commentary, no explanation of your choices.
 ${extra ? `- ${extra}\n` : ''}
@@ -481,7 +485,7 @@ Respond ONLY with a JSON array of strings: ["prompt1", "prompt2", ...]`;
       };
 
       const temp = mode === 'recreate' ? 0.7 : mode === 'sequel' ? 1.05 : 0.95;
-      return this.ask(build, { count, temperature: temp });
+      return this.ask(build, { count, temperature: temp, arm });
     },
 
     /** Write prompts from online research plus zero or more vision-read references. */
@@ -496,11 +500,12 @@ Respond ONLY with a JSON array of strings: ["prompt1", "prompt2", ...]`;
       if (!sourceRows.length && !refRows.length) throw new Error('the research found no usable text or images');
       const researchKind = kind === 'character' ? 'character' : 'concept';
       const m = RESEARCH_MODES[mode] || RESEARCH_MODES.recreate;
-      const house = window.PromptStyle ? PromptStyle.block() : '';
+      const arm = window.PromptStyle && PromptStyle.pickArm ? PromptStyle.pickArm() : null;
+      const house = window.PromptStyle ? PromptStyle.block({ arm: arm || 'action' }) : '';
       const profile = window.PromptStyle ? PromptStyle.profile() : { enough: false };
-      const lengthRule = profile.enough
-        ? `${profile.lo}-${profile.hi} words each, in comma-separated fragments — that is this artist's measured range.`
-        : '40-90 words each.';
+      const lengthRule = window.PromptStyle && PromptStyle.lengthRule ? PromptStyle.lengthRule(profile)
+        : profile.enough ? `${profile.lo}-${profile.hi} words each, in comma-separated fragments — that is this artist's measured range.`
+          : '40-90 words each.';
 
       const webBlock = sourceRows.slice(0, 8).map((s, i) =>
         `[SOURCE ${i + 1}] ${String(s.title || 'untitled').slice(0, 180)}\n`
@@ -548,15 +553,15 @@ ${m.rule}
 Write ${n} prompts. Hard requirements:
 - ${lengthRule}
 - Each prompt is complete generator input for ONE picture and stands alone.
-- Open with the subject and its identity/state, never with "anime illustration", "digital art of", "an image of", or "a portrait of".
+${window.PromptStyle && PromptStyle.prose && PromptStyle.prose() ? PromptStyle.proseRules(arm || 'action').map((r) => `- ${r}`).join('\n') + '\n- Write what the camera can see, not biography or lore.\n' : `- Open with the subject and its identity/state, never with "anime illustration", "digital art of", "an image of", or "a portrait of".
 - Write visible facts, not biography, lore, feelings, or a sequence of events the camera cannot show.
-- No numbering, citations, commentary, URLs, artist names, watermarks, signatures, or explanation.
+`}- No numbering, citations, commentary, URLs, artist names, watermarks, signatures, or explanation.
 ${extra ? `- ARTIST'S EXTRA INSTRUCTION (trusted): ${String(extra).slice(0, 1200)}\n` : ''}
 Respond ONLY with a JSON array of strings: ["prompt1", "prompt2", ...]`;
       };
 
       const temperature = mode === 'recreate' ? 0.72 : mode === 'variations' ? 0.85 : 1.0;
-      return this.ask(build, { count, temperature });
+      return this.ask(build, { count, temperature, arm });
     },
 
     /** Decompose a story the artist wrote into the pieces a prompt writer can use. */
@@ -613,11 +618,12 @@ ${moments.join('\n')}`;
       const b = breakdown || await this.readStory(text);
       const m = STORY_MODES[mode] || STORY_MODES.beats;
 
-      const house = window.PromptStyle ? PromptStyle.block() : '';
+      const arm = window.PromptStyle && PromptStyle.pickArm ? PromptStyle.pickArm() : null;
+      const house = window.PromptStyle ? PromptStyle.block({ arm: arm || 'action' }) : '';
       const p = window.PromptStyle ? PromptStyle.profile() : { enough: false };
-      const lengthRule = p.enough
-        ? `${p.lo}-${p.hi} words each, in comma-separated fragments — that is this artist's measured range.`
-        : '40-90 words each.';
+      const lengthRule = window.PromptStyle && PromptStyle.lengthRule ? PromptStyle.lengthRule(p)
+        : p.enough ? `${p.lo}-${p.hi} words each, in comma-separated fragments — that is this artist's measured range.`
+          : '40-90 words each.';
 
       const build = (n, have) => {
         const dodge = [...have, ...avoid];
@@ -634,14 +640,14 @@ ${m.rule}
 Write ${n} prompts. Hard requirements:
 - The generator NEVER sees the story and has no memory between images. Every prompt stands alone: restate the character's full appearance (body, hair, face, outfit and its state) as it is at that moment, in every prompt. Never a "she" that points at a previous prompt; never "then", "later", "now", "still".
 - ${lengthRule}
-- Write generator input, not a caption and not narration. Never open with the medium ("anime illustration", "digital art of", "an image of") and never narrate — no "she feels", no "as if", no sentences about what is happening. Open with the subject and the state it is in, then tags, then the render and quality tokens.
-- Each prompt describes ONE scene. Be clear and specific — vagueness produces generic images.
+${window.PromptStyle && PromptStyle.prose && PromptStyle.prose() ? PromptStyle.proseRules(arm || 'action').map((r) => `- ${r}`).join('\n') + '\n' : `- Write generator input, not a caption and not narration. Never open with the medium ("anime illustration", "digital art of", "an image of") and never narrate — no "she feels", no "as if", no sentences about what is happening. Open with the subject and the state it is in, then tags, then the render and quality tokens.
+`}- Each prompt describes ONE scene. Be clear and specific — vagueness produces generic images.
 - No numbering, no commentary, no explanation of your choices.
 ${extra ? `- ${extra}\n` : ''}
 Respond ONLY with a JSON array of strings: ["prompt1", "prompt2", ...]`;
       };
 
-      const res = await this.ask(build, { count, temperature: mode === 'beats' ? 0.8 : 1.0 });
+      const res = await this.ask(build, { count, temperature: mode === 'beats' ? 0.8 : 1.0, arm });
       return { ...res, breakdown: b };
     },
 
@@ -756,9 +762,9 @@ This brief is an ADDON. The source material above — the example prompt, the re
     },
 
     /** The measured playbook, at the strength the active profile allows. */
-    labGuidance({ theme = '', on = true } = {}) {
+    labGuidance({ theme = '', on = true, profileId = null, snapshot = null } = {}) {
       if (!on || !window.Insights) return '';
-      const g = Insights.guidance({ theme });
+      const g = Insights.guidance({ theme, snapshot });
       if (!g) return '';
       const p = this.profile();
       if ((p.playbook || 'full') === 'full') return g;

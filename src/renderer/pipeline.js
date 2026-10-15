@@ -224,7 +224,7 @@
 
   const T = {
     ideation(theme, example, count, avoid = [], guidance = '', extras = {}) {
-      const { house = '', skeleton = '', modeRule = '', extra = '' } = extras;
+      const { house = '', skeleton = '', modeRule = '', extra = '', arm = 'action' } = extras;
       const houseBlock = house ? `\n${house}\n` : '';
       const modeBlock = modeRule ? `\nHOW FAR TO TRAVEL FROM THE EXAMPLE:\n${modeRule}\n` : '';
       return `You are a creative director for an anime-style AI art studio. Your job is to write image-generation prompts.
@@ -235,10 +235,27 @@ Write ${count} DISTINCT, highly detailed image prompts for an anime image genera
 - Each prompt describes ONE scene: character(s), appearance, outfit, pose, expression, setting, lighting, camera angle.
 - Be clear and specific about the theme — the audience wants variety within it.
 - Vary composition: different poses, angles, settings, moods across the ${count} prompts.
-- Write generator input, not a caption: comma-separated fragments, subject first, render and quality tokens last. Never open a prompt by naming the medium (no "anime illustration", no "digital art of", no "an image of").
-- 40-90 words each. No preamble, no numbering.
+${window.PromptStyle && PromptStyle.prose && PromptStyle.prose()
+    ? PromptStyle.proseRules(arm || 'action').map((r) => `- ${r}`).join('\n') + '\n- No preamble, no numbering.'
+    : `- Write generator input, not a caption: comma-separated fragments, subject first, render and quality tokens last. Never open a prompt by naming the medium (no "anime illustration", no "digital art of", no "an image of").
+- 40-90 words each. No preamble, no numbering.`}
 ${extra ? `- ${extra}\n` : ''}
 Respond ONLY with a JSON array of strings: ["prompt1", "prompt2", ...]`;
+    },
+    promptVariants(prompt, k, proseOn = false, arm = 'action') {
+      return `You rewrite one image-generation prompt into ${k} alternative version(s) of the SAME picture idea. The image model barely varies between random seeds, so the variety has to come from the words.
+
+THE PROMPT:
+"""${String(prompt).slice(0, 1600)}"""
+
+For each version:
+- Keep EXACTLY: who the character is (name, hair, eyes, skin, body type, species traits), what they are wearing, the theme and what is happening to them, and the art style.
+- Change the staging: a different camera angle and distance, a different pose or gesture, a slightly different moment of the event (just starting, at its peak, or just after), and one different detail of the setting or the light.
+- Every version differs from the original and from the other versions in BOTH camera and pose.
+- Keep the original's form, language and roughly its length${proseOn ? ` (plain sentences, ${arm === 'character' ? 'who the character is' : 'the moment'} in the first sentence, no tag lists, no "no X" phrases)` : ''}. Keep names and any <image1>-style markers exactly as written.
+- No commentary, no numbering.
+
+Respond ONLY with a JSON array of ${k} string(s).`;
     },
     /** Ideation for the advanced generator, where the writer picks the page's dropdowns too. */
     ideationAdvanced(theme, example, count, avoid = [], guidance = '', menu = '', maxControls = 12, pinnedStyle = '', extras = {}) {
@@ -809,6 +826,36 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
       return `CONTROLS AVAILABLE — the control's name, what the page calls it, then its options.\n${lines.join('\n')}`;
     },
 
+    async promptVariants(job, logFn = log) {
+      const cfg = State.settings.comfy || {};
+      const proseOn = !!(window.PromptStyle && PromptStyle.prose && PromptStyle.prose());
+      const original = String(job.prompt || '');
+      const base = proseOn ? PromptStyle.stripTags(original) : original;
+      if (base !== original) logFn('Dropped quality/guard tags Qwen has no negative prompt for (1girl, masterpiece, no extra …).');
+      if (Array.isArray(job.variants) && job.variants.length && job.variants[0] === base) return job.variants;
+      const per = Number(job.count) > 0 ? Number(job.count) : Math.max(1, Math.round(Number(cfg.imagesPerPrompt) || 1));
+      const setting = cfg.promptVariants == null ? 3 : Math.round(Number(cfg.promptVariants)) || 1;
+      const want = Math.min(Math.max(1, setting), per, 6);
+      if (want < 2) return [base];
+      try {
+        this.setPhase('Restaging the prompt for seed variety…');
+        const r = await U.llmChat([{ role: 'user', content: T.promptVariants(base, want - 1, proseOn, job.promptArm || 'action') }],
+          { temperature: 0.9, maxTokens: 6000, role: 'ideation' }, 'Prompt variants');
+        let alts = U.promptsFrom(r, { count: want - 1, max: IDEA_MAX_CHARS }).map((p) => String(p).trim());
+        if (proseOn) alts = alts.map((p) => PromptStyle.stripTags(p));
+        if (window.Teach && alts.length) alts = Teach.screen(alts).kept;
+        alts = [...new Set(alts)].filter((p) => p && p !== base).slice(0, want - 1);
+        if (!alts.length) throw new Error('the writer returned no usable variant');
+        job.variants = [base, ...alts];
+        State.persistQueue();
+        logFn(`Spreading ${per} seed(s) over ${job.variants.length} restaged prompts (Qwen barely varies between seeds).`, 'ok');
+        return job.variants;
+      } catch (e) {
+        logFn(`Could not write prompt variants (${e.message}) — every seed uses the one prompt.`, 'err');
+        return [base];
+      }
+    },
+
     /** Controls for a prompt that arrived without any. */
     async chooseControls(prompt) {
       const menu = this.controlMenu();
@@ -839,7 +886,8 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         ? (window.Insights ? window.Insights.guidance({ theme }) : '')
         : guidance;
 
-      const house = window.PromptStyle ? PromptStyle.block() : '';
+      const arm = window.PromptStyle && PromptStyle.pickArm ? PromptStyle.pickArm() : null;
+      const house = window.PromptStyle ? PromptStyle.block({ arm: arm || 'action' }) : '';
 
       const pool = String(example || '').split(/\n\s*-{3,}\s*\n/).map((s) => s.trim()).filter(Boolean);
       let seed = pool.length > 1 ? pool[Math.floor(Math.random() * pool.length)] : (pool[0] || '');
@@ -865,7 +913,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
       }
       const advanced = !!menu;
       const maxControls = Math.max(1, Number((State.settings.gen || {}).advMaxFilters) || 12);
-      const extras = { house, skeleton: skeletonBlock, modeRule };
+      const extras = { house, skeleton: skeletonBlock, modeRule, arm: arm || 'action' };
 
       const build = (n, dodge, extra) => (advanced
         ? T.ideationAdvanced(theme, seed, n, dodge, learned, menu, maxControls,
@@ -928,16 +976,20 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
 
       if (window.PromptStyle) {
         const prof = PromptStyle.profile();
-        const score = (i) => PromptStyle.houseScore(i.prompt, prof);
+        const score = (i) => (PromptStyle.voiceScore || PromptStyle.houseScore)(i.prompt, prof);
         const weak = list.filter((i) => score(i) <= 0);
         if (weak.length) {
           log(`${weak.length} of ${list.length} prompt(s) came back off-voice — asking again.`, 'err');
           let repl = [];
           try {
             const again = await ask(weak.length, [...weak.map((i) => i.prompt), ...avoid],
-              'The previous attempt was rejected for form. Comma-separated fragments in the'
-              + ' artist\u2019s voice shown above: no prose, no third-person narration'
-              + ' ("she is holding…"), and never open by naming the medium.');
+              PromptStyle.prose && PromptStyle.prose()
+                ? 'The previous attempt was rejected for form. Plain English sentences for Qwen-Image:'
+                  + (arm === 'character' ? ' who the character is first,' : ' the moment first,')
+                  + ' no tag lists, no quality tokens, no "no X" phrases, and never open by naming the medium.'
+                : 'The previous attempt was rejected for form. Comma-separated fragments in the'
+                  + ' artist\u2019s voice shown above: no prose, no third-person narration'
+                  + ' ("she is holding…"), and never open by naming the medium.');
             repl = again.ideas.filter((i) => score(i) > 0);
           } catch (e) {
             log(`Could not re-ask for the off-voice prompts (${e.message}) — keeping them.`, 'err');
@@ -948,7 +1000,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         }
         const sorted = list.map(score).sort((a, b) => a - b);
         log(`Voice score for this batch: median ${sorted[Math.floor(sorted.length / 2)]}`
-          + ` (his own prompts: median 6 on this scale).`);
+          + (PromptStyle.prose && PromptStyle.prose() ? ' (Qwen prose scale: 3 = clean prose).' : ` (his own prompts: median 6 on this scale).`));
       }
 
       if (advanced) {
@@ -968,6 +1020,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         log(`${list.length} prompt(s) written, ${withControls} with generator controls chosen.`);
       }
       State.bumpStats({ promptsGenerated: list.length });
+      if (arm && PromptStyle.noteArm) PromptStyle.noteArm(list.map((i) => i.prompt), arm);
       return list;
     },
 
@@ -1013,6 +1066,8 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         id: U.uid(), theme: theme || '', prompt,
         status: 'queued', attempts: 0, error: null,
         promptSource: source, learnedFrom,
+        promptStyle: window.PromptStyle && PromptStyle.prose && PromptStyle.prose() ? 'prose' : 'tags',
+        promptArm: (window.PromptStyle && PromptStyle.armOf && PromptStyle.armOf(prompt)) || null,
         controls: controls && Object.keys(controls).length ? controls : null,
         createdAt: Date.now(), updatedAt: Date.now(),
       };
@@ -1206,7 +1261,13 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
       let batch;
       try {
         let references = [];
-        if (Array.isArray(job.referenceIds) && job.referenceIds.length) {
+        if (job.comic && window.Comics) {
+          if (generationDriver !== this._comfyDriver) {
+            throw new Error('comic panels need the ComfyUI engine (Settings → Generation) — Perchance cannot take the cast sheet as a reference');
+          }
+          this.setPhase('Preparing comic references…');
+          references = await Comics.jobReferences(job);
+        } else if (Array.isArray(job.referenceIds) && job.referenceIds.length) {
           if (generationDriver === this._comfyDriver) {
             this.setPhase('Preparing searched references…');
             references = await this.researchReferences(job);
@@ -1221,11 +1282,18 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           }
         }
 
+        let variants = null;
+        if (window.Models) job.model = Models.ofJob(job, generationDriver === this._comfyDriver ? 'comfy' : 'perchance');
+        if (generationDriver === this._comfyDriver && !job.comic && !job.editOf && job.promptSource !== 'edit') {
+          variants = await this.promptVariants(job, log);
+        }
+
         this.setPhase('Generating images…');
         const result = await generationDriver.generate(job.prompt,
           { filters: job.controls, references, shouldStop: () => this._stopRequested, count: Number(job.count) > 0 ? Number(job.count) : 0,
             // An edit (Image Edit tab, 🩹 Fix, Overseer edit_image) comes back at the source size.
-            matchSource: !!job.editOf }, log);
+            matchSource: !!job.editOf || !!(job.comic && job.comic.edit),
+            aspect: job.aspect || '', workflow: job.workflow || '', variants }, log);
         const refResult = result.referenceResult || null;
         job.attachedReferenceIds = refResult ? [...(refResult.attached || [])] : [];
         job.referenceErrors = [
@@ -1242,6 +1310,17 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           this.engineDown = null;
         }
         State.bumpStats({ imagesGenerated: images.length });
+
+        if (job.comic && window.Comics) {
+          this.setPhase(`Saving ${images.length} comic picture(s)…`);
+          await Comics.acceptJobImages(job, images);
+          job.status = 'done';
+          job.error = null;
+          job.updatedAt = Date.now();
+          State.persistQueue();
+          log(`Comic ${job.comic.kind === 'sheet' ? 'cast sheet' : 'panel'} rendered — ${images.length} picture(s) handed to the comic.`, 'ok');
+          return;
+        }
 
         this.setPhase(`Saving ${images.length} image(s)…`);
         const items = [];
@@ -1276,6 +1355,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         }
         job.updatedAt = Date.now();
         State.persistQueue();
+        if (job.status === 'failed' && job.comic && window.Comics) Comics.jobFailed(job);
         return;
       }
 
@@ -1675,13 +1755,18 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         // An Image Edit / Fix card keeps its source's prompt as `prompt` — titles, metadata
         // and QC all read it — and the instruction Qwen got as `editPrompt`. A fix
         // instruction quotes the QC critique, which must never reach the title writer.
-        id: saved.id, jobId: job.id, theme: job.theme, prompt: job.basePrompt || job.prompt,
+        id: saved.id, jobId: job.id, theme: job.theme, prompt: img.prompt || job.basePrompt || job.prompt,
+        variantIndex: Number.isInteger(img.variantIndex) && img.variantIndex > 0 ? img.variantIndex : undefined,
+        model: job.model || (window.Models ? Models.active() : undefined),
+        promptStyle: job.promptStyle || undefined,
+        promptArm: job.promptArm || undefined,
         editPrompt: job.promptSource === 'edit' ? job.prompt : null,
         editLabel: job.editLabel || null,
         editRoot: job.editRoot || null,
         // Image Edit history: the artist's own instruction (✎ Reuse) and which checkpoint a ↻ Redo repeats.
         editInstruction: job.editInstruction || null,
         redoOf: job.redoOf || null,
+        designOf: job.designOf || undefined,
         fixOf: job.fixOf || null,
         autoFix: job.autoFix ? true : undefined,
         promptSource: job.promptSource || 'ideation', learnedFrom: job.learnedFrom || null,

@@ -526,11 +526,13 @@ async function callChat(endpoint, messages, { temperature, maxTokens, jsonMode, 
     const finishReason = choice.finish_reason || choice.finishReason || '';
     const toolCalls = toolsNow ? readToolCalls(msg) : [];
     const fromReasoning = !answer && !!msg.reasoning_content && !toolCalls.length;
+    const reasoning = answer ? String(msg.reasoning_content || msg.reasoning || '').trim().slice(0, 12000) : '';
     const u = data.usage || {};
     return {
       text: toolCalls.length && !answer ? '' : text,
       finishReason,
       fromReasoning,
+      reasoning,
       toolCalls,
       nativeTools: toolsNow,
       truncated: finishReason === 'length',

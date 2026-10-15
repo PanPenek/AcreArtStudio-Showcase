@@ -27,7 +27,7 @@ const research = require('./research');
 const { createVideoInspector } = require('./videocheck');
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'ala', privileges: { secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } },
+  { scheme: 'ala', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } },
 ]);
 
 let win = null;
@@ -391,6 +391,8 @@ function registerIpc() {
   h('db:setPerf', (_e, data) => { store.perf.data = data; store.perf.save(); return true; });
   h('db:getPlaybook', () => store.playbook.data);
   h('db:setPlaybook', (_e, data) => { store.playbook.data = data; store.playbook.save(); return true; });
+  h('db:getSnapshots', () => store.snapshots.data);
+  h('db:setSnapshots', (_e, data) => { store.snapshots.data = data; store.snapshots.save(); return true; });
   h('db:getTitles', () => store.titles.data);
   h('db:setTitles', (_e, data) => { store.titles.data = data; store.titles.save(); return true; });
   h('db:getOrigins', () => store.origins.data);

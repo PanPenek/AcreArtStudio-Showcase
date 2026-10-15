@@ -1,0 +1,82 @@
+/* videomerge.css: styles for the Video Merge tab (picture strip, timeline, history). */
+
+.vm-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.vm-empty {
+  border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 40px 20px;
+  text-align: center; color: var(--text-faint); width: 100%;
+}
+
+.vm-strip { display: flex; align-items: stretch; gap: 6px; overflow-x: auto; padding: 4px 2px 10px; }
+.vm-arrow { align-self: center; color: var(--text-faint); font-size: 18px; flex: none; }
+.vm-frame {
+  flex: none; width: 232px; display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.vm-thumb { cursor: zoom-in; position: relative; aspect-ratio: 1 / 1; background: var(--bg-sunken); border-radius: var(--radius-sm); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.vm-thumb img { max-width: 100%; max-height: 100%; display: block; user-select: none; }
+.vm-letter {
+  position: absolute; top: 6px; left: 6px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px;
+  background: var(--accent); color: #1c1917; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center;
+}
+.vm-name { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vm-when { font-size: 12.5px; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.vm-when input { width: 64px; padding: 3px 6px; }
+.vm-btns { display: flex; gap: 4px; justify-content: space-between; }
+.vm-addtile {
+  flex: none; width: 96px; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: transparent;
+  color: var(--text-dim); cursor: pointer; font-size: 26px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+}
+.vm-addtile span { font-size: 12px; }
+.vm-addtile:hover { border-color: var(--accent); color: var(--accent-soft); }
+
+.vm-timeline { position: relative; height: 46px; margin: 2px 12px 8px; }
+.vm-tl-bar { position: absolute; left: 0; right: 0; top: 16px; height: 3px; border-radius: 2px; background: var(--border-strong); }
+.vm-dot {
+  position: absolute; top: 6px; transform: translateX(-50%); min-width: 22px; height: 22px; padding: 0 5px; border-radius: 999px;
+  background: var(--accent); color: #1c1917; font-weight: 700; font-size: 11.5px; display: flex; align-items: center; justify-content: center;
+}
+.vm-tl-end { position: absolute; right: 0; top: 30px; font-size: 11px; color: var(--text-faint); }
+.vm-timeline:empty { height: 0; margin: 0; }
+
+.vm-controls { display: flex; flex-direction: column; gap: 10px; }
+.vm-controls textarea { width: 100%; resize: vertical; font-family: var(--font-mono, ui-monospace, Consolas, monospace); font-size: 12.5px; line-height: 1.45; }
+.vm-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.vm-render-row { align-items: center; gap: 14px; }
+.vm-log { margin: 0; max-height: 120px; overflow: auto; font-size: 11.5px; color: var(--text-faint); white-space: pre-wrap; }
+.vm-log:empty { display: none; }
+.vm-hist-title { margin: 22px 0 10px; font-size: 14px; }
+.vm-hist-title[hidden] { display: none; }
+
+.vm-hist { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; }
+.vm-clip { display: flex; gap: 12px; padding: 10px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.vm-clip video { width: 200px; max-height: 260px; flex: none; background: #000; border-radius: var(--radius-sm); }
+.vm-clip-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.vm-clip-tl { font-size: 12.5px; color: var(--text); }
+.vm-clip-pics { display: flex; gap: 4px; }
+.vm-clip-pics img { width: 34px; height: 34px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); }
+.vm-clip details summary { cursor: pointer; font-size: 12px; color: var(--text-dim); }
+.vm-clip pre { margin: 6px 0 0; max-height: 160px; overflow: auto; white-space: pre-wrap; font-size: 11.5px; color: var(--text-dim); }
+.vm-clip .btn-row { flex-wrap: wrap; gap: 6px; margin-top: auto; }
+
+.vm-picker { width: min(1180px, 95vw); height: 90vh; max-height: 90vh; display: flex; flex-direction: column; gap: 10px; }
+.vm-pick-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.vm-pick-bar input[type="search"] { flex: 1; min-width: 180px; max-width: 320px; }
+.vm-pick-tabs { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
+.vm-pick-tab { background: transparent; border: 0; color: var(--text-dim); padding: 6px 12px; cursor: pointer; font: inherit; font-size: 12.5px; }
+.vm-pick-tab.on { background: var(--accent); color: #1c1917; font-weight: 600; }
+.vm-pick-grid {
+  flex: 1 1 0; min-height: 0; overflow-y: auto; display: grid; padding: 2px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); grid-auto-rows: max-content; align-content: start; gap: 8px;
+}
+.vm-pick-grid .vm-empty { grid-column: 1 / -1; }
+.vm-pick { position: relative; display: block; width: 100%; padding: 0; aspect-ratio: 1 / 1; border: 2px solid transparent; border-radius: var(--radius-sm); background: var(--bg-sunken); cursor: pointer; overflow: hidden; }
+.vm-pick img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vm-pick:hover { border-color: var(--border-hover); }
+.vm-pick.on { border-color: var(--accent); }
+.vm-pick-n { position: absolute; top: 6px; left: 6px; min-width: 22px; height: 22px; border-radius: 999px; background: var(--accent); color: #1c1917; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+.vm-pick-tag { position: absolute; bottom: 6px; right: 6px; padding: 1px 6px; border-radius: 4px; background: rgba(0, 0, 0, .7); color: var(--text); font-size: 10.5px; font-weight: 600; }
+.vm-pick-foot { align-items: center; }
+
+.vm-zoom { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, .88); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: zoom-out; }
+.vm-zoom img { max-width: 94vw; max-height: 88vh; object-fit: contain; border-radius: var(--radius-sm); }
+.vm-zoom-cap { color: var(--text-dim); font-size: 12.5px; }

@@ -277,6 +277,7 @@
         creativity: 1, devices: true, useDaHistory: true, avoidCount: 24,
         similarityLimit: 0.5, maxRepairs: 1, bannedWords: [],
         learnStyle: true, styleExamples: 8, deviceMode: 'auto',
+        hookShare: 0.35,
         ...(m.titles || {}),
       };
     },
@@ -625,8 +626,31 @@
             + shapes.map((d, i) => `${i + 1}. ${d}`).join('\n')
           : `TITLE SHAPE — write it as ${shapes[0]}. This is a rule about form; the title must still describe the image.`);
       }
+      const hooks = this.hookIndexes(count);
+      if (hooks.length) {
+        const how = 'a loud first-person reaction from inside the moment: a shout or a panicked question ending in'
+          + ' "!" or "?!", one word in CAPS allowed. Like "WHY IS MY CAT ON THE ROOF?!", "Uhh!? THE SPELL BACKFIRED!",'
+          + ' "The lighthouse is MOVING!". It must still be about this image';
+        parts.push(count > 1
+          ? `HOOK TITLES: write title${hooks.length > 1 ? 's' : ''} ${hooks.map((i) => i + 1).join(', ')} as ${how}. The others stay in the house voice.`
+          : `THIS TITLE IS A HOOK: write it as ${how}.`);
+      }
       if (this.level.push) parts.push(this.level.push);
       return parts.join('\n\n');
+    },
+
+    hookIndexes(count = 1, rnd = Math.random) {
+      const share = Math.max(0, Math.min(1, Number(this.cfg.hookShare) || 0));
+      const n = Math.max(0, Math.floor(Number(count) || 0));
+      if (!share || !n) return [];
+      if (n === 1) return rnd() < share ? [0] : [];
+      const k = Math.max(1, Math.round(n * share));
+      const idx = [...Array(n).keys()];
+      for (let i = idx.length - 1; i > 0; i--) {
+        const j = Math.floor(rnd() * (i + 1));
+        [idx[i], idx[j]] = [idx[j], idx[i]];
+      }
+      return idx.slice(0, k).sort((a, b) => a - b);
     },
 
     /** Temperature for a title-writing call at the configured creativity. */
