@@ -209,7 +209,7 @@
     try {
       const d = window.Pipeline && Pipeline.genDriver ? Pipeline.genDriver() : null;
       if (!d || typeof d.loadWorkflow !== 'function') return null;
-      const wf = await d.loadWorkflow(d.cfg.imageWorkflow);
+      const wf = await d.loadWorkflow(editWorkflow() || d.cfg.imageWorkflow);
       return latentSizeOf(wf);
     } catch {
       return null;
@@ -225,6 +225,27 @@
     if (src.w === native.width && src.h === native.height) return null;
     return `This picture is ${src.w}×${src.h}, but the edit workflow's native size is ${native.width}×${native.height}. `
       + `The result keeps this picture's size (${src.w}×${src.h}), but editing a picture of a different size can lower the edit quality.`;
+  }
+
+  /**
+   * The workflow Image Edit jobs (and 🩹 fixes) render with: the tab's own picker
+   * (`comfy.editWorkflow`) or, unset, the generator's image workflow.
+   */
+  function editWorkflow() {
+    const c = (window.State && State.settings && State.settings.comfy) || {};
+    return String(c.editWorkflow || c.imageWorkflow || '');
+  }
+
+  /**
+   * Picker entries: workflows that can take the picture (a reference/edit file), never the
+   * video workflow; the current pick is kept even if its name doesn't match.
+   */
+  function editWorkflowChoices(files, comfy = {}) {
+    const video = String(comfy.videoWorkflow || '');
+    const out = (Array.isArray(files) ? files : []).filter((f) => /\.json$/i.test(f) && f !== video
+      && /reference|edit|\bref\b|_ref[_.]|qwen[-_ ]?image|klein/i.test(f) && !/\b(?:i2v|t2v|t2i|video)\b|[_-](?:i2v|t2v|t2i|video)[_.-]|text[-_ ]?to[-_ ]?image/i.test(f));
+    if (comfy.editWorkflow && !out.includes(comfy.editWorkflow)) out.push(String(comfy.editWorkflow));
+    return out;
   }
 
   function comfyOn() {
@@ -257,6 +278,8 @@
     job.editOf = row.id;
     job.editRoot = root || (card && card.editRoot) || row.id;
     job.editLabel = clean(label).slice(0, 200);
+    const picked = ((State.settings && State.settings.comfy) || {}).editWorkflow;
+    if (picked) job.workflow = String(picked);
     const extra = (Array.isArray(refs) ? refs : []).filter((r) => r && r.fname && r.id !== row.id).slice(0, MAX_EDIT_REFS);
     job.chatReferences = [{ ...row }, ...extra.map((r) => ({ ...r }))];
     job.referenceIds = job.chatReferences.map((r) => r.id);
@@ -786,7 +809,7 @@ Answer ONLY with JSON: {"prompt": "the full new prompt", "pose": "the pose you c
 
   window.ImageEdit = {
     FIX_PRESETS, editPrompt, fixPrompt, locationPhrase, regionInstruction, fixInstruction,
-    latentSizeOf, nativeSize, sizeWarning, comfyOn, cardRow, queueEdit, queueFix, queueRerender, queueRepair, fixRoute, maybeAutoFix, autoFixTries, noteFixResult,
+    latentSizeOf, nativeSize, sizeWarning, editWorkflow, editWorkflowChoices, comfyOn, cardRow, queueEdit, queueFix, queueRerender, queueRepair, fixRoute, maybeAutoFix, autoFixTries, noteFixResult,
     visionAvailable, planFix, plannedFixPrompt, PLAN_PROMPT, planRemake, remakePrompt, DESIGN_PROMPT,
     historyTree, historyRows, redoSpec, reuseText, refSentence, cardRefs, MAX_EDIT_REFS,
   };

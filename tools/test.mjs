@@ -21,10 +21,14 @@
  *   - models.js       : which image model made a picture
  *   - imageedit.js    : a character remake is described in words, not pasted
  *   - promptstyle.js  : tag-list fragments are dropped from plain-sentence prompts
+ *   - comfy.js        : FLUX.3 Image Klein graphs take reference pictures (workflows/ + a node-schema fixture)
+ *   - imageedit.js    : the Image Edit tab's workflow picker
+ *   - overseer.js     : queue_art takes library cards (or a batch's best pictures) as references
  */
 import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 // Note: values created inside the VM have their own Array/Object prototypes, so
 // structured results are compared as JSON rather than with deepEqual.
 
@@ -357,6 +361,183 @@ console.log('promptstyle.js (plain sentences)');
   test('quality tags and "no X" guards are dropped from a sentence prompt', () => {
     assert.equal(P.stripTags('A fox reads a map under a lantern, masterpiece, best quality, 4k, no extra fingers.'), 'A fox reads a map under a lantern.');
     assert.equal(P.stripTags('A lighthouse in a storm.'), 'A lighthouse in a storm.');
+  });
+}
+
+async function testAsync(name, fn) {
+  try { await fn(); passed++; console.log('  ok   ' + name); }
+  catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + e.message); }
+}
+const J = (x) => JSON.stringify(x);
+
+console.log('comfy.js (FLUX.3 Image Klein references)');
+{
+  const C = load('state.js', 'comfy.js').ComfyUI;
+  const defs = JSON.parse(fs.readFileSync(new URL('../../tools/fixtures/flux3_object_info.json', root), 'utf8'));
+  const raw = JSON.parse(fs.readFileSync(new URL('../../workflows/AcreArtStudio_FLUX.3-Klein_int8.json', root), 'utf8'));
+  const wf = C.normalizeWorkflow(raw, defs);
+  const N = wf.nodes;
+  const byClass = (c) => Object.entries(N).filter(([, n]) => n.classType === c);
+  const [rmlId, rml] = byClass('ReferenceMultiLatent')[0] || [];
+  const [ksId, ks] = byClass('KSampler')[0] || [];
+  const [encId] = byClass('CLIPTextEncode')[0] || [];
+  test('the editor file normalizes: named widgets, a wired width does not slide into batch_size', () => {
+    assert.ok(!wf.needsDefs && !byClass('MarkdownNote').length);
+    assert.ok(rml && rml.inputs.resolution === 'resize' && rml.inputs['resolution.megapixels'] === 1, J(rml && rml.inputs));
+    assert.ok(ks && ks.inputs.steps === 16 && ks.inputs.sampler_name === 'er_sde', J(ks && ks.inputs));
+    const [, lat] = byClass('EmptyFlux2LatentImage')[0];
+    assert.ok(Array.isArray(lat.inputs.width) && Array.isArray(lat.inputs.height) && lat.inputs.batch_size === 1, J(lat.inputs));
+  });
+  test('the prompt traces through ReferenceMultiLatent to CLIPTextEncode', () => {
+    const slots = C.detectPromptSlots(wf);
+    assert.ok(slots && slots.positive === encId && !slots.negative, J(slots));
+    assert.equal(C.detectSeedSlot(wf).id, ksId);
+  });
+  test('references land on ReferenceMultiLatent as zero-based images.image0…', () => {
+    const g = JSON.parse(J(N));
+    const w = C.injectQwenReferences(g, ['a.png', 'b.png', 'c.png'], 2);
+    assert.ok(w.ok && w.targetId === rmlId, J(w));
+    assert.equal(J(w.inserted.map((x) => x.slot)), J(['images.image0', 'images.image1']));
+    assert.equal(J(w.skipped), J(['c.png']));
+    const again = C.injectQwenReferences(g, ['z.png'], 1);
+    assert.ok(again.ok && !g[rmlId].inputs['images.image1'], 're-injection clears the previous set');
+    assert.equal(C.referenceSlotName({ classType: 'TextEncodeQwenImage21' }, 0), 'images.image_1');
+  });
+  test('a FLUX.3 edit samples on the reference latent and keeps the source size', () => {
+    const e = JSON.parse(J(N));
+    C.injectQwenReferences(e, ['src.png'], 1);
+    const m = C.matchEditSize(e, { w: 512, h: 768 });
+    assert.ok(m.ok && J(e[ksId].inputs.latent_image) === J([rmlId, 2]), J(m));
+    assert.equal(J(m.canvas), '{"width":832,"height":1248}');
+    assert.equal(J(C.rmlEditCanvas({ w: 1024, h: 1024 }, { resolution: 'resize', 'resolution.megapixels': 1 })), '{"width":1024,"height":1024}');
+  });
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  async function runGen(nodes, prompt, refs) {
+    const d = new C.ComfyDriver({ comfy: {} });
+    Object.defineProperty(d, 'cfg', { get: () => ({ imageWorkflow: 'x.json', imagesPerPrompt: 1, maxReferences: 1 }) });
+    let sent = null;
+    d.ensureServer = async () => {};
+    d.loadWorkflow = async () => ({ nodes: JSON.parse(J(nodes)) });
+    d.uploadImage = async ({ nameHint }) => `${nameHint}.png`;
+    d.submit = async (graph) => { sent = graph; return { ok: true, promptId: 'p1' }; };
+    d.pollHistory = async () => ({});
+    d.collectImages = async () => [{ base64: 'x', mime: 'image/png', w: 1, h: 1 }];
+    await d.generate(prompt, { count: 1, references: refs }, () => {});
+    return sent;
+  }
+  await testAsync('<image1> becomes <ref_image_0> on a FLUX.3 graph only', async () => {
+    const s1 = await runGen(N, 'Keep the lighthouse in <image1>; add a rainbow.', [{ id: 'r1', base64: PNG, mime: 'image/png' }]);
+    assert.equal(s1[encId].inputs.text, 'Keep the lighthouse in <ref_image_0>; add a rainbow.');
+    const s2 = await runGen(N, 'A plain <image1> mention with no reference.', []);
+    assert.equal(s2[encId].inputs.text, 'A plain <image1> mention with no reference.');
+    const qwen = { '1': { classType: 'VAELoader', inputs: { vae_name: 'v' } }, '2': { classType: 'TextEncodeQwenImage21', inputs: { prompt: '', vae: ['1', 0], resolution: 1024 } },
+      '3': { classType: 'KSampler', inputs: { seed: 1, positive: ['2', 0], negative: ['2', 1], latent_image: ['2', 2] } } };
+    const s3 = await runGen(qwen, 'In <image1> the sky turns orange.', [{ id: 'q', base64: PNG, mime: 'image/png' }]);
+    assert.ok(s3['2'].inputs.prompt === 'In <image1> the sky turns orange.' && Array.isArray(s3['2'].inputs['images.image_1']), J(s3['2'].inputs));
+  });
+}
+
+console.log('imageedit.js (edit workflow picker)');
+{
+  const w = load('state.js', 'comfy.js', 'imageedit.js');
+  const E = w.ImageEdit;
+  w.State.settings = { comfy: { imageWorkflow: 'AcreArtStudio_Qwen-Image-2.1_Q8.json', editWorkflow: '', videoWorkflow: 'AcreArtStudio_FastH3_Video.json' } };
+  test('the picker lists edit-capable workflows only and keeps the current pick', () => {
+    const files = ['a_Text_to_Image.json', 'b_Text_and_Reference.json', 'AcreArtStudio_FastH3_Video.json', 'AcreArtStudio_Qwen-Image-2.1_Q4.json', 'AcreArtStudio_FLUX.3-Klein_int8.json', 'c_Edit.json', 'notes.txt'];
+    assert.equal(J(E.editWorkflowChoices(files, w.State.settings.comfy)),
+      J(['b_Text_and_Reference.json', 'AcreArtStudio_Qwen-Image-2.1_Q4.json', 'AcreArtStudio_FLUX.3-Klein_int8.json', 'c_Edit.json']));
+    assert.equal(J(E.editWorkflowChoices(['x.json'], { editWorkflow: 'mine.json' })), J(['mine.json']));
+  });
+  test('no pick → the generator workflow; a pick wins', () => {
+    assert.equal(E.editWorkflow(), 'AcreArtStudio_Qwen-Image-2.1_Q8.json');
+    w.State.settings.comfy.editWorkflow = 'AcreArtStudio_FLUX.3-Klein_int8.json';
+    assert.equal(E.editWorkflow(), 'AcreArtStudio_FLUX.3-Klein_int8.json');
+  });
+}
+
+console.log('overseer.js (library cards as references)');
+{
+  const require = createRequire(import.meta.url);
+  const { DEFAULT_SETTINGS } = require('../src/main/store.js');
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+  const w = load({ setInterval, clearInterval }, 'state.js', 'perchance.js', 'promptstyle.js', 'promptlab.js', 'titles.js', 'comfy.js', 'pipeline.js', 'overseer.js');
+  const { State, Pipeline, Overseer } = w;
+  State.addLog = () => {};
+  State.persistQueue = () => {};
+  State.persistLibrary = () => {};
+  State.settings = structuredClone(DEFAULT_SETTINGS);
+  State.settings.gen.engine = 'comfy';
+  State.queue = [];
+  State.worker = { running: false, currentJobId: null, statusText: 'Idle', qcLane: 0 };
+  Pipeline.start = () => { Pipeline.running = true; };
+  Pipeline.laneImages = () => 0;
+  Pipeline.ideate = async (theme, _e, count) => Array.from({ length: count }, (_, i) => ({ prompt: `${theme} #${i}`, controls: {} }));
+  w.Teach = { screen: (p) => ({ kept: p, dropped: [] }) };
+  w.Variety = { invalidate: () => {} };
+  const card = (id, extra = {}) => ({ id, fname: `img-${id}.png`, mime: 'image/png', prompt: 'x', theme: 'x', status: 'review', promptSource: 'overseer', ...extra });
+  State.library = [
+    card('c1'), card('c2'), card('nofile', { fname: '' }),
+    card('a-s5', { batchId: 'bA', qc: { score: 5 } }), card('a-s9', { batchId: 'bA', qc: { score: 9 } }),
+    card('a-s7', { batchId: 'bA', qc: { score: 7 } }), card('a-s8', { batchId: 'bA', qc: { score: 8 } }),
+    card('a-s6', { batchId: 'bA', qc: { score: 6 } }), card('a-noqc', { batchId: 'bA', qc: null }),
+    card('a-bin', { batchId: 'bA', status: 'discarded', qc: { score: 10 } }), card('a-rej', { batchId: 'bA', status: 'rejected', qc: { score: 10 } }),
+  ];
+  let saved = 0;
+  w.ala = {
+    settings: { patch: async () => State.settings },
+    db: { getOverseer: async () => ({}), setOverseer: async () => true },
+    files: {
+      readImageBase64: async () => PNG,
+      saveAttachment: async (_b, mime, name) => ({ fname: `ovr-${saved++}-${name}.png`, mime }),
+      readAttachment: async () => ({ base64: PNG, mime: 'image/png' }),
+    },
+    llm: { chat: async () => ({ text: '{"say":"ok","tool":null,"done":true}' }), route: async () => ({ maxConcurrency: 1, vision: true }) },
+  };
+  await testAsync('a card named by id rides with every job, copied like an attachment', async () => {
+    const r = await Overseer.queueArt({ theme: 'a forest path in autumn', count: 2, referenceImages: ['card-c1'] });
+    assert.ok(r.ok, r.error);
+    assert.equal(J(State.queue.map((j) => j.referenceIds)), J([['card-c1'], ['card-c1']]));
+    assert.ok(/^ovr-/.test(State.queue[0].chatReferences[0].fname));
+    assert.equal(J(r.cardReferences), J(['card-c1']));
+  });
+  await testAsync('bare ids work and several cards rotate one per picture', async () => {
+    State.queue = [];
+    const r = await Overseer.queueArt({ theme: 't', count: 4, referenceImages: ['c1', 'c2'] });
+    assert.equal(J(r.cardReferences), J(['card-c1', 'card-c2']));
+    assert.ok(r.cycled === true && State.queue[0].referenceIds[0] !== State.queue[1].referenceIds[0], J(r));
+    State.queue = [];
+    const n = await Overseer.queueArt({ theme: 't', count: 2, referenceImages: ['c1', 'c2'], cycleReferences: false });
+    assert.ok(!n.cycled, 'cycleReferences:false still wins');
+  });
+  await testAsync('unknown or fileless cards fail loudly; chat ids keep their own path', async () => {
+    const bad = await Overseer.queueArt({ theme: 't', count: 1, referenceImages: ['card-zzz'] });
+    assert.ok(!bad.ok && /no library card with id zzz/.test(bad.error) && Array.isArray(bad.recentResults), J(bad));
+    const nofile = await Overseer.queueArt({ theme: 't', count: 1, referenceImages: ['card-nofile'] });
+    assert.ok(!nofile.ok && /nofile/.test(nofile.error), J(nofile));
+    const chat = await Overseer.queueArt({ theme: 't', count: 1, referenceImages: ['a1'] });
+    assert.ok(!chat.ok && /no attached image called a1/.test(chat.error), J(chat));
+  });
+  await testAsync('referenceBatch takes the four best finished pictures of a batch', async () => {
+    State.queue = [];
+    const r = await Overseer.queueArt({ theme: 'variations', count: 4, referenceBatch: 'bA' });
+    assert.equal(J(r.cardReferences), J(['card-a-s9', 'card-a-s8', 'card-a-s7', 'card-a-s6']));
+    assert.ok(/4 best of 6 finished/.test(r.cardNote), r.cardNote);
+    State.queue = [];
+    Overseer._lastBatchId = 'bA';
+    const latest = await Overseer.queueArt({ theme: 'variations', count: 1, referenceBatch: 'latest' });
+    assert.ok(latest.ok && latest.cardReferences.length === 4 && /batch bA/.test(latest.cardNote), J(latest));
+    State.queue = [{ id: 'j1', batchId: 'bWait', status: 'generating' }];
+    const wait = await Overseer.queueArt({ theme: 'v', count: 1, referenceBatch: 'bWait' });
+    assert.ok(!wait.ok && /no finished picture yet \(1 still to render\)/.test(wait.error), J(wait));
+    const none = await Overseer.queueArt({ theme: 'v', count: 1, referenceBatch: 'bNope' });
+    assert.ok(!none.ok && /no usable picture/.test(none.error), J(none));
+    State.queue = [];
+    const both = await Overseer.queueArt({ theme: 'v', count: 1, referenceImages: ['c1', 'card-a-s9'], referenceBatch: 'bA' });
+    assert.equal(J(both.cardReferences), J(['card-c1', 'card-a-s9', 'card-a-s8', 'card-a-s7', 'card-a-s6']));
+  });
+  test('queue_art documents card ids and referenceBatch to the model', () => {
+    const cat = Overseer.catalogue();
+    assert.ok(/referenceBatch/.test(cat) && /library cardId/.test(cat));
   });
 }
 

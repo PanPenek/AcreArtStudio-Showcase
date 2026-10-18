@@ -334,6 +334,20 @@
         const inputs = Object.assign({}, wired);
         const def = defs[n.type];
         if (!def) continue;
+        const named = n.widgets_values_named;
+        if (named && typeof named === 'object' && !Array.isArray(named)) {
+          // Names are authoritative when the file has them (same rule as the subgraph path).
+          Object.assign(inputs, widgetInputs(n, def, wired));
+          nodes[id] = { classType: n.type, inputs };
+          continue;
+        }
+        // A widget converted to an input and wired still keeps its old value in widgets_values.
+        // That value belongs to the wired input and is swallowed there, so it cannot slide into
+        // the next free input of the same type (width 1024 → batch_size 1024).
+        const wiredWidgets = new Set((n.inputs || [])
+          .filter((inp) => inp && inp.widget && inp.widget.name && wired[inp.widget.name] !== undefined)
+          .map((inp) => inp.widget.name));
+        const swallowed = new Set();
         {
           const ordered = inputIds(def);
           const wv = (Array.isArray(n.widgets_values) ? n.widgets_values : []).slice();
@@ -342,7 +356,13 @@
             if (typeof val === 'string' && CONTROL.test(val)) continue;
             let placed = false;
             for (const name of ordered) {
-              if (inputs[name] !== undefined) continue;
+              if (inputs[name] !== undefined) {
+                if (wiredWidgets.has(name) && !swallowed.has(name)) {
+                  const wc = inputConfig(def, name, inputs);
+                  if (wc && acceptsValue(val, wc)) { swallowed.add(name); placed = true; break; }
+                }
+                continue;
+              }
               const config = inputConfig(def, name, inputs);
               if (!config) continue;
               if (acceptsValue(val, config)) { inputs[name] = val; placed = true; break; }
@@ -577,13 +597,24 @@
     return Number.isFinite(n) && n > 0 ? Math.min(n, MAX_REFERENCE_IMAGES) : DEFAULT_MAX_REFERENCES;
   };
   const qwenReferenceTarget = (nodes) => Object.entries(nodes || {})
-    .find(([, n]) => n && n.classType === 'TextEncodeQwenImage21');
+    .find(([, n]) => n && (n.classType === 'TextEncodeQwenImage21' || n.classType === 'ReferenceMultiLatent'));
+
+  /**
+   * Two reference sockets exist. Qwen-Image 2.1 takes its pictures on the text encoder as
+   * `images.image_1…16`; FLUX.3 Image Klein takes them on the core `ReferenceMultiLatent` node
+   * between the encoder and the sampler, as zero-based `images.image0…`. Both nodes put the
+   * first reference's canvas on output 2 (LATENT), so the edit path reuses it.
+   */
+  const referenceSlotName = (node, index) => (node && node.classType === 'ReferenceMultiLatent'
+    ? `images.image${index}` : `images.image_${index + 1}`);
+  const referenceModelName = (node) => (node && node.classType === 'ReferenceMultiLatent'
+    ? 'FLUX.3 Klein' : 'Qwen-Image 2.1');
 
   function clearQwenReferences(nodes, targetId) {
     const target = nodes[targetId];
     const old = [];
     for (const [name, value] of Object.entries(target.inputs || {})) {
-      if (!/^images\.image_\d+$/i.test(name)) continue;
+      if (!/^images\.image_?\d+$/i.test(name)) continue;
       if (isWire(value)) old.push(value[0]);
       delete target.inputs[name];
     }
@@ -598,7 +629,7 @@
 
   function injectQwenReferences(nodes, filenames, limit = DEFAULT_MAX_REFERENCES) {
     const found = qwenReferenceTarget(nodes);
-    if (!found) return { ok: false, error: 'the selected image workflow has no TextEncodeQwenImage21 reference input' };
+    if (!found) return { ok: false, error: 'the selected image workflow has no TextEncodeQwenImage21 (Qwen-Image 2.1) or ReferenceMultiLatent (FLUX.3 Klein) reference input' };
     const [targetId, target] = found;
     clearQwenReferences(nodes, targetId);
 
@@ -607,7 +638,7 @@
       if (vae) target.inputs.vae = [vae[0], 0];
     }
     if (!isWire(target.inputs.vae)) {
-      return { ok: false, error: 'the Qwen reference encoder is not connected to a VAE loader' };
+      return { ok: false, error: `the ${referenceModelName(target)} reference node is not connected to a VAE loader` };
     }
 
     const wanted = (Array.isArray(filenames) ? filenames : []).map(String).filter(Boolean);
@@ -617,8 +648,9 @@
       let id = `ala-ref-${index + 1}`;
       while (nodes[id]) id += '-x';
       nodes[id] = { classType: 'LoadImage', inputs: { image: String(fname) } };
-      target.inputs[`images.image_${index + 1}`] = [id, 0];
-      inserted.push({ id, fname: String(fname), slot: `images.image_${index + 1}` });
+      const slot = referenceSlotName(target, index);
+      target.inputs[slot] = [id, 0];
+      inserted.push({ id, fname: String(fname), slot });
     });
     const skipped = wanted.slice(capped);
     return { ok: true, targetId, inserted, skipped, limit: capped };
@@ -648,6 +680,25 @@
   }
 
   /**
+   * The canvas ReferenceMultiLatent makes from its first picture: with `resolution` = resize,
+   * `megapixels`·1024² pixels in the picture's own aspect (Python round per side); otherwise
+   * the picture's own size. The VAE then crops each side down to a multiple of 8.
+   * Null when it cannot be worked out.
+   */
+  function rmlEditCanvas(src, inputs) {
+    if (!src || !(src.w > 0) || !(src.h > 0)) return null;
+    const mode = String((inputs && inputs.resolution) || 'resize');
+    let w = src.w, h = src.h;
+    if (mode === 'resize') {
+      const mp = Number(inputs && inputs['resolution.megapixels']);
+      const target = (Number.isFinite(mp) && mp > 0 ? mp : 1) * 1024 * 1024;
+      const scale = Math.sqrt(target / (src.w * src.h));
+      w = Math.max(1, pyRound(src.w * scale)); h = Math.max(1, pyRound(src.h * scale));
+    }
+    return { width: Math.floor(w / 8) * 8, height: Math.floor(h / 8) * 8 };
+  }
+
+  /**
    * Image edits come back at the SOURCE picture's size. Otherwise an edit would render on the
    * workflow's own empty latent (1024×1024 on the Qwen graph), so a 512×768 picture would come
    * back square and re-framed. On a copy of the graph:
@@ -663,9 +714,10 @@
    */
   function matchEditSize(nodes, size) {
     const found = qwenReferenceTarget(nodes);
-    if (!found) return { ok: false, rewired: [], scaled: false, reason: 'the workflow has no Qwen reference encoder' };
+    if (!found) return { ok: false, rewired: [], scaled: false, reason: 'the workflow has no reference node (Qwen encoder / ReferenceMultiLatent)' };
     const [encId, enc] = found;
-    if (!isWire(enc.inputs['images.image_1'])) return { ok: false, rewired: [], scaled: false, reason: 'no picture on the encoder\'s image_1' };
+    const isRml = enc.classType === 'ReferenceMultiLatent';
+    if (!isWire(enc.inputs[referenceSlotName(enc, 0)])) return { ok: false, rewired: [], scaled: false, reason: 'no picture on the reference node\'s first image slot' };
     const rewired = [];
     for (const [id, n] of Object.entries(nodes)) {
       if (!n || !SAMPLER_RE.test(n.classType || '') || !n.inputs || !isWire(n.inputs.latent_image)) continue;
@@ -675,7 +727,7 @@
       n.inputs.latent_image = [encId, 2];
       rewired.push(id);
     }
-    const canvas = qwenEditCanvas(size, enc.inputs.resolution ?? 1024);
+    const canvas = isRml ? rmlEditCanvas(size, enc.inputs) : qwenEditCanvas(size, enc.inputs.resolution ?? 1024);
     const w = Math.round(Number(size && size.w)), h = Math.round(Number(size && size.h));
     let scaled = false;
     if (w >= 16 && h >= 16 && w <= 16384 && h <= 16384 && !(canvas && canvas.width === w && canvas.height === h)) {
@@ -794,7 +846,7 @@
       const requested = all.slice(0, limit);
       if (!requested.length) return null;
       if (!qwenReferenceTarget(nodes)) {
-        throw new Error('this researched job has image references, but the selected workflow has no TextEncodeQwenImage21 reference input');
+        throw new Error('this researched job has image references, but the selected workflow has no TextEncodeQwenImage21 (Qwen-Image 2.1) or ReferenceMultiLatent (FLUX.3 Klein) reference input');
       }
 
       const uploaded = [];
@@ -824,7 +876,7 @@
         id: String((ref && ref.id) || `reference-${limit + index + 1}`),
         error: `not attached — past the ${limit}-reference ceiling (Settings → Generator)`,
       }));
-      log(`Attached ${uploaded.length}/${requested.length} researched reference image(s) to Qwen-Image 2.1.`
+      log(`Attached ${uploaded.length}/${requested.length} researched reference image(s) to ${referenceModelName(nodes[wired.targetId])}.`
         + (failed.length ? ` ${failed.length} could not be uploaded.` : '')
         + (skipped.length ? ` ${skipped.length} left out by the ${limit}-reference ceiling.` : ''));
       return { requested: requested.length, attached: uploaded.map((r) => r.id), failed, skipped, limit };
@@ -882,6 +934,14 @@
       const base = JSON.parse(JSON.stringify(wf.nodes));
       base[target.id].inputs[target.field] = String(promptText);
       const referenceResult = await this.stageReferenceImages(base, references, log);
+      // Prompt writers name pictures the Qwen way (`<image1>`). FLUX.3 Klein expects
+      // `<ref_image_0>` for the first reference, so on a FLUX.3 graph the tokens are translated.
+      const refNode = referenceResult && referenceResult.attached && referenceResult.attached.length
+        ? qwenReferenceTarget(base) : null;
+      const mapRefTokens = refNode && refNode[1].classType === 'ReferenceMultiLatent'
+        ? (s) => String(s).replace(/<image(\d+)>/gi, (_, n) => `<ref_image_${Math.max(0, Number(n) - 1)}>`)
+        : (s) => s;
+      base[target.id].inputs[target.field] = mapRefTokens(base[target.id].inputs[target.field]);
       // An image edit keeps the source picture's size and framing (see matchEditSize).
       if (matchSource && referenceResult && referenceResult.attached && referenceResult.attached.length) {
         const first = (Array.isArray(references) ? references : [])[0] || {};
@@ -916,7 +976,7 @@
         }
         const graph = JSON.parse(JSON.stringify(base));
         const vi = texts ? (i - 1) % texts.length : 0;
-        if (texts) graph[target.id].inputs[target.field] = texts[vi];
+        if (texts) graph[target.id].inputs[target.field] = mapRefTokens(texts[vi]);
         if (seed) {
           let s = randSeed();
           while (used.has(s)) s = randSeed();
@@ -1269,6 +1329,6 @@ ${key}`;
     writeMergePrompt, addKeyframes, nearestAspect, setAspect, ASPECTS,
     expandSubgraphs, promptFieldOf, widgetInputs, resolvePromptTarget, qwenReferenceTarget,
     clearQwenReferences, injectQwenReferences, referenceLimit, MAX_REFERENCE_IMAGES, ComfyDriver,
-    sniffSize, engineDown, matchEditSize, qwenEditCanvas,
+    sniffSize, engineDown, matchEditSize, qwenEditCanvas, rmlEditCanvas, referenceSlotName,
   };
 })();

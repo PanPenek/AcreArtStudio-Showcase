@@ -238,6 +238,8 @@ The second generation engine, with the same contract as the Perchance driver: `g
 
 Image edits come back at the source picture's size: `matchEditSize` rewires the sampler onto the Qwen encoder's own `<image1>` canvas (the source aspect at about one megapixel) and puts one lanczos `ImageScale` in front of the save node, on a copy of the graph.
 
+Reference pictures go to whichever reference node the graph has: the Qwen-Image 2.1 encoder (`images.image_1…`) or FLUX.3 Image Klein's core `ReferenceMultiLatent` (zero-based `images.image0…`, with `<image1>` in the prompt translated to `<ref_image_0>`). On a FLUX.3 graph the edit canvas is the one `ReferenceMultiLatent` builds from the first picture.
+
 ---
 
 ## Writing prompts and titles

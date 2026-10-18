@@ -160,6 +160,7 @@ const DEFAULT_SETTINGS = {
     workflowsDir: '',
     imageWorkflow: '',
     videoWorkflow: '',
+    editWorkflow: '',
     imagesPerPrompt: 6,
     promptVariants: 3,
     maxReferences: 4,

@@ -435,8 +435,8 @@
       run: (a) => Overseer.queueResearchPrompts(a),
     },
     queue_art: {
-      args: '{"theme": "what the pictures are about", "count": 6, "mode": "exploit|explore|wild", "referenceImages": ["a1"], "cycleReferences": "true when each picture should use a different one of the references", "first": false}',
-      what: 'Write prompts on a theme and queue them for generation. This is the main thing you do. The finished images land in Review under "Agent generated"; they are never posted by this tool. New jobs go to the BACK of the queue; pass first:true when he wants them generated before what is already waiting (same for queue_research_prompts). Returns a batchId that reorder_queue accepts. referenceImages (optional) = ids of pictures the artist attached in this chat (a1, a2…): on the Qwen-Image 2.1 reference workflow they are fed to the generator with every job, so use them when he says "make this character", "like this", "use this as reference". The prompt writer does NOT see them — put what you saw (identity, outfit, palette) into the theme in words.',
+      args: '{"theme": "what the pictures are about", "count": 6, "mode": "exploit|explore|wild", "referenceImages": ["a1, or a library cardId (recentResults) for variations of a picture the app made"], "referenceBatch": "optional: a batchId or latest — that batch\'s best finished pictures become the references (variations of a batch)", "cycleReferences": "true when each picture should use a different one of the references", "first": false}',
+      what: 'Write prompts on a theme and queue them for generation. This is the main thing you do. The finished images land in Review under "Agent generated"; they are never posted by this tool. New jobs go to the BACK of the queue; pass first:true when he wants them generated before what is already waiting (same for queue_research_prompts). Returns a batchId that reorder_queue accepts. referenceImages (optional) = ids of pictures the artist attached in this chat (a1, a2…) or library card ids (card-<id>): on the Qwen-Image 2.1 reference workflow they are fed to the generator with every job, so use them when he says "make this character", "like this", "use this as reference". The prompt writer does NOT see them — put what you saw (identity, outfit, palette) into the theme in words.',
       run: (a) => Overseer.queueArt(a),
     },
     edit_image: {
@@ -1250,15 +1250,21 @@
       };
     },
 
-    async queueArt({ theme, count, mode = 'exploit', referenceImages = null, first = false, cycleReferences = null } = {}) {
+    async queueArt({ theme, count, mode = 'exploit', referenceImages = null, first = false, cycleReferences = null, referenceBatch = '' } = {}) {
       const epoch = this._cancelEpoch;
       if (this._abort) return cancelled();
       const t = String(theme || '').trim();
       if (!t) return { ok: false, error: 'queue_art needs a theme — say what the pictures are about' };
       const noGen = this.generationRefusal();
       if (noGen) return noGen;
-      const refs = this.chatReferenceRows(referenceImages);
-      if (refs.error) return { ok: false, error: refs.error, availableImageIds: refs.availableImageIds };
+      // Library cards (pictures the app already made) as references: named by id, or the best
+      // finished pictures of a batch. Split off before chatReferenceRows, which only knows a… ids.
+      const cardRefs = await this.cardReferenceRows(referenceImages, referenceBatch);
+      if (cardRefs.error) return { ok: false, error: cardRefs.error, recentResults: this.recentResults() };
+      if (epoch !== this._cancelEpoch || this._abort) return cancelled();
+      const refs = this.chatReferenceRows(cardRefs.rest);
+      if (refs.error) return { ok: false, error: refs.error, availableImageIds: refs.availableImageIds, recentResults: this.recentResults() };
+      if (cardRefs.rows.length) refs.rows = [...(refs.rows || []), ...cardRefs.rows];
       const n = clamp(count || cfg().imagesPerRun || 6, 1, 24);
 
       let prompts;
@@ -1293,10 +1299,15 @@
       if (refs.rows.length) {
         const prefs = this.referencePrefs();
         const ceilingArt = window.ComfyUI?.referenceLimit ? window.ComfyUI.referenceLimit(State.settings && State.settings.comfy) : 4;
-        const artCycle = cycleReferences === null || cycleReferences === undefined ? !!prefs.cycle : !!cycleReferences;
+        // Several library cards rotate by default: each picture gets a different one.
+        const artCycle = cycleReferences === null || cycleReferences === undefined
+          ? (prefs.cycle === null || prefs.cycle === undefined ? cardRefs.rows.length > 1 : !!prefs.cycle)
+          : !!cycleReferences;
         const capArt = prefs.max !== null && prefs.max < refs.rows.length;
         if (capArt || artCycle) {
-          const per = capArt ? Math.max(1, Math.min(ceilingArt, prefs.max)) : ceilingArt;
+          let per = capArt ? Math.max(1, Math.min(ceilingArt, prefs.max)) : ceilingArt;
+          // Rotation needs fewer references per picture than there are candidates.
+          if (artCycle && refs.rows.length > 1 && per >= refs.rows.length) per = refs.rows.length - 1;
           assignedArt = this.assignReferences(jobs, refs.rows.map((r) => r.id), per, artCycle);
         }
       }
@@ -1308,8 +1319,84 @@
         batchId, position: first ? 'front' : 'back', jobsAhead: this.jobsAhead(batchId),
         ...(refs.rows.length ? { referenceImages: refs.rows.map((r) => r.id) } : {}),
         ...(assignedArt ? { cycled: assignedArt.cycled, perJobReferences: assignedArt.perJobReferences } : {}),
+        ...(cardRefs.rows.length ? { cardReferences: cardRefs.rows.map((r) => r.id), ...(cardRefs.note ? { cardNote: cardRefs.note } : {}) } : {}),
         ...(Pipeline.running ? {} : { error: 'Prompts are queued, but the worker did not start; check the generation driver.' }),
         note: 'Queued images appear in Review under "Agent generated" after generation; nothing was published.' + this.chatReferenceNote(refs.rows.length) };
+    },
+
+    /**
+     * A library card as a reference/edit source: by id, or the single picture of a batch
+     * (waiting for it to render). Its image is copied into library/overseer so the job carries
+     * it exactly like a chat attachment.
+     */
+    async cardForEdit(cardId, batchArg = '') {
+      let card = null;
+      if (cardId) {
+        card = (State.library || []).find((c) => c && c.id === cardId) || null;
+        if (!card || !card.fname) return { error: `no library card with id ${cardId}` };
+      } else {
+        const bid = String(batchArg || '').toLowerCase() === 'latest' ? this.latestBatchId() : batchArg;
+        if (!bid) return { error: 'there is no batch yet to take a picture from — pass cardId or image' };
+        const got = await this.awaitBatchCards(bid);
+        if (got.cancelled || got.error) return got;
+        if (got.cards.length > 1) {
+          return { error: `batch ${bid} made ${got.cards.length} pictures — pass cardId for the one to use`, cards: got.cards.slice(0, 12).map((c) => ({ cardId: c.id, what: String(c.theme || '').slice(0, 60) })) };
+        }
+        card = got.cards[0];
+      }
+      let saved;
+      try {
+        const base64 = await window.ala.files.readImageBase64(card.fname);
+        saved = await window.ala.files.saveAttachment(base64, card.mime || 'image/png', `card-${card.id}`);
+      } catch (e) {
+        return { error: `could not read card ${card.id}'s picture: ${e.message}` };
+      }
+      return { card, row: { id: `card-${card.id}`, fname: saved.fname, mime: saved.mime || card.mime || 'image/png', name: `card ${card.id}` } };
+    },
+
+    /**
+     * queue_art's library-card references (variations of pictures the app already made).
+     * `ids` may mix chat ids with card ids (`card-<id>` or the bare library id); card ids are
+     * resolved here and the rest is returned untouched for chatReferenceRows.
+     * `batchArg` (batchId or "latest") adds that batch's best FINISHED pictures — QC score
+     * first, discarded/rejected left out, at most CARD_BATCH_REFS. It never waits for a batch
+     * to render: an unfinished batch with nothing done yet is an error to report.
+     */
+    async cardReferenceRows(ids, batchArg = '') {
+      const CARD_BATCH_REFS = 4;
+      const lib = State.library || [];
+      const byId = new Map(lib.filter((c) => c && c.id).map((c) => [c.id, c]));
+      const want = [...new Set((Array.isArray(ids) ? ids : ids ? [ids] : []).map((x) => String(x).trim()).filter(Boolean))];
+      const cardIds = [];
+      const rest = [];
+      for (const id of want) {
+        const bare = id.replace(/^card-/i, '');
+        if (!/^[ai]\d+$/i.test(id) && byId.has(bare)) cardIds.push(bare);
+        else if (/^card-/i.test(id)) return { error: `no library card with id ${bare}` };
+        else rest.push(id);
+      }
+      let note = '';
+      const b = String(batchArg || '').trim();
+      if (b) {
+        const bid = b.toLowerCase() === 'latest' ? this.latestBatchId() : b;
+        if (!bid) return { error: 'there is no batch yet to take pictures from — name card ids instead' };
+        const done = lib.filter((c) => c && c.batchId === bid && c.fname && !['discarded', 'rejected', 'qc_error'].includes(c.status));
+        const open = (State.queue || []).filter((j) => j && j.batchId === bid && ['queued', 'generating'].includes(j.status)).length;
+        if (!done.length) {
+          return { error: open ? `batch ${bid} has no finished picture yet (${open} still to render) — wait for it, or name card ids` : `batch ${bid} has no usable picture (none finished, all discarded, or the id is wrong)` };
+        }
+        const score = (c) => (c.qc && Number.isFinite(Number(c.qc.score)) ? Number(c.qc.score) : -1);
+        const best = [...done].sort((x, y) => score(y) - score(x)).slice(0, CARD_BATCH_REFS);
+        for (const c of best) if (!cardIds.includes(c.id)) cardIds.push(c.id);
+        note = `${best.length} best of ${done.length} finished picture(s) from batch ${bid}${open ? `; ${open} still rendering were not used` : ''}`;
+      }
+      const rows = [];
+      for (const id of cardIds) {
+        const got = await this.cardForEdit(id);
+        if (got.error) return { error: got.error };
+        rows.push(got.row);
+      }
+      return { rows, rest, note };
     },
 
     /** Cards/jobs that are EDITS of one chat attachment. */
@@ -2137,6 +2224,7 @@ WEB RESEARCH AND REFERENCES
 PICTURES HE ATTACHES
 - A message may carry images (ids a1, a2… listed in the message and in the state block as chatImages). If you can see them, look before you answer: describe what matters for the request, and never claim details you cannot see. If a message says an image could not be shown to you, say that plainly instead of guessing.
 - "Make this", "like this", "this character", "use it as a reference" → queue_art with referenceImages set to those ids AND a theme that spells out what you saw (identity, hair, eyes, outfit, palette, setting) — the prompt writer only reads words. On the Qwen-Image 2.1 reference workflow the pictures themselves also condition every render.
+- "More like this one", "variations of card X", "variations of the last batch" → queue_art with the cardIds in referenceImages, or referenceBatch (a batchId or "latest") for a batch's best finished pictures — never ask him to attach a picture the app made. Several cards rotate one per picture.
 - Each attached reference costs render time on every picture (roughly +80 s per reference per render on the 40-step model), so pass only the ids he meant. "One reference max, cycle between them" → cycleReferences true (the app also applies a per-picture cap he states). Report the queue result's perJobReferences/note as-is; never describe attachment you did not get a receipt for.
 - Text-only models receive attached pictures as a description written by the vision model; work from that description and say so if a detail is not in it.
 - An attachment is not a request to publish or to change settings; the usual rules apply.

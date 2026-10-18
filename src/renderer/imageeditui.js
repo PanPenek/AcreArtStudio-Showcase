@@ -36,12 +36,16 @@
   let native = null;        // workflow render size (cached per session)
   let nativeAt = 0;
   let peeking = false;
+  let wfList = null;        // workflow files in comfy.workflowsDir (picker)
+  let wfAt = 0;
+  let wfDir = '';
 
   const ui = {
     wire() {
       const pane = $('#pane-imageedit');
       if (!pane) return;
       $('#ie-upload').addEventListener('click', () => $('#ie-file').click());
+      $('#ie-wf').addEventListener('change', (e) => this.pickWorkflow(e.target.value));
       $('#ie-file').addEventListener('change', (e) => { this.loadFile(e.target.files && e.target.files[0]); e.target.value = ''; });
       $('#ie-brush').addEventListener('input', (e) => { brush = Number(e.target.value) || 48; $('#ie-brush-out').textContent = brush; });
       $('#ie-clear').addEventListener('click', () => this.clearMask());
@@ -121,7 +125,51 @@
       $('#ie-empty').hidden = !!rootKey;
       $('#ie-stage').hidden = !rootKey;
       for (const id of ['#ie-go', '#ie-pop-go']) $(id).disabled = !on || !rootKey;
+      this.renderWorkflows();
+      // The licence line follows the edit workflow.
+      const lic = document.querySelector('.ie-licence');
+      if (lic) {
+        const wf = ImageEdit.editWorkflow();
+        lic.textContent = /flux/i.test(wf)
+          ? 'FLUX.3 Image Klein is under the FLUX Kommunity Licence (non-commercial; commercial output allowed under US$5M yearly revenue).'
+          : 'Qwen-Image 2.1 is under the Qwen Research Licence (non-commercial).';
+      }
       this.renderHistory();
+    },
+
+    // ---------- workflow picker ----------
+    /**
+     * Edit-capable workflows only: a text-to-image file has no reference input, so an edit
+     * through it would ignore the picture. The list is re-read from disk at most every 30 s.
+     */
+    async renderWorkflows(force = false) {
+      const sel = $('#ie-wf');
+      if (!sel || sel.matches(':focus')) return;
+      const c = (State.settings && State.settings.comfy) || {};
+      const dir = String(c.workflowsDir || '');
+      if (force || !wfList || Date.now() - wfAt > 30000 || wfDir !== dir) {
+        wfAt = Date.now();
+        wfDir = dir;
+        try { wfList = dir ? await window.ala.comfy.listWorkflows(dir) : []; } catch { wfList = []; }
+      }
+      const files = ImageEdit.editWorkflowChoices(wfList, c);
+      const label = (f) => f.replace(/\.json$/i, '').replace(/_/g, ' ');
+      const gen = String(c.imageWorkflow || '');
+      const html = [`<option value="">Same as generator${gen ? ` (${esc(label(gen))})` : ''}</option>`]
+        .concat(files.map((f) => `<option value="${esc(f)}">${esc(label(f))}</option>`)).join('');
+      if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
+      sel.value = files.includes(c.editWorkflow) ? c.editWorkflow : '';
+    },
+
+    async pickWorkflow(file) {
+      try {
+        State.settings = await window.ala.settings.patch({ comfy: { editWorkflow: String(file || '') } });
+      } catch (e) {
+        toast(`could not save the workflow: ${e.message || e}`, 'err');
+      }
+      native = null;
+      this.render();
+      toast(`Edits now use ${file ? file.replace(/\.json$/i, '') : 'the generator workflow'}`);
     },
 
     // ---------- session ----------

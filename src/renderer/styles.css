@@ -2133,3 +2133,4 @@ body.triage-open #toast-root { bottom: 76px; }
 .lf-what b { font-weight: 600; }
 .lf-what .hint { display: block; }
 .lf-snap.in-use .lf-what b::after { content: "  ● in use"; color: var(--accent-soft); font-weight: 500; font-size: 12px; }
+.ie-inline #ie-wf { max-width: 340px; }

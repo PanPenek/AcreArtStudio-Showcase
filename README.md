@@ -191,6 +191,12 @@ always use **Qwen-Image 2.1**:
 | Q8 | Quality | about 8 GB | 17.7 GB |
 | Q4 | Balanced | about 4-5 GB | 14.2 GB |
 
+`workflows/` also holds an optional **FLUX.3 Image Klein** graph (distilled int8, 16 steps,
+ComfyUI 0.41 or newer). The installer does not download its models; the note inside the graph
+lists the three files. Choose it as the generator workflow, or only for edits with the Image
+Edit tab's *Workflow* menu. Reference pictures work on both engines: the app wires them to
+whichever reference node the graph has.
+
 **3. Video (optional).** Turns approved pictures into short clips with sound, using FastH3
 (MiniMax H3 distilled to 4 steps). **It needs a graphics card with 16-24 GB of VRAM** and a
 44 GB download, so the installer asks first and warns you.
@@ -233,7 +239,7 @@ matter if you want to publish.
 | **Overseer** | Chat with the assistant. It can research a subject, write and queue prompts, edit pictures, make and merge videos, make comics and report back. Every action it takes is shown, so you can check what it did, and with a reasoning model its thinking is one click away (💭 Thought) |
 | **Prompt Lab** | Write prompts from examples, reference images or a story. Manage the generation queue |
 | **Review** | The main grid: every picture with its score, defects, prompt and metadata. Keyboard-driven. Every card has **✎ Edit** and **🩹 Fix** |
-| **Image Edit** | Edit one picture with Qwen-Image 2.1: brush an area and say what should change there, or describe a change to the whole picture. Every result is a numbered checkpoint in a history panel (undo, redo with a new seed, reuse an instruction, branch from an older one). Results keep the source picture's size. 📎 attaches up to three reference pictures; *"make her the character from image2"* has a vision model describe that character and redraws it in the source picture's style |
+| **Image Edit** | Edit one picture with Qwen-Image 2.1: brush an area and say what should change there, or describe a change to the whole picture. Every result is a numbered checkpoint in a history panel (undo, redo with a new seed, reuse an instruction, branch from an older one). Results keep the source picture's size. A *Workflow* menu picks the edit engine (for example FLUX.3 Image Klein) without changing the generator's. 📎 attaches up to three reference pictures; *"make her the character from image2"* has a vision model describe that character and redraws it in the source picture's style |
 | **Video Merge** | One clip through two or more pictures: set the second each picture is reached, let the model write how it changes (or write it yourself) and render it with the ComfyUI video workflow. The clip lands in Review as a new card |
 | **Drafts** | What has been uploaded, what is waiting, what failed and why |
 | **Statistics** | How published work performs, the learned playbook, and your own *Teach it* rules |
@@ -340,7 +346,7 @@ AcreArtStudio-Showcase/
 ├── docs/
 │   ├── ARCHITECTURE.md          module-by-module map for reviewers
 │   └── screenshots/
-├── workflows/                   ComfyUI graphs the installer sets up (Qwen-Image 2.1 Q8/Q4, FastH3 video)
+├── workflows/                   ComfyUI graphs (Qwen-Image 2.1 Q8/Q4 and FastH3 video from the installer, optional FLUX.3 Klein)
 ├── tools/
 │   ├── setup.mjs                model installer: VRAM detection, menus, verified downloads
 │   └── test.mjs                 offline unit tests (no Electron, no network)
@@ -381,7 +387,9 @@ would run them) and check their behaviour directly. You don't need Electron, a n
 connection, a GPU or an AI model to run them. They cover JSON recovery from messy AI
 answers, the quality tail added to every prompt, prompt detection, title similarity, comic page geometry
 and text wrapping, the parser for the AI's batch picks, the Video Merge timeline, which image
-model made a picture, the character-remake prompt and tag clean-up for sentence prompts.
+model made a picture, the character-remake prompt, tag clean-up for sentence prompts, reference
+pictures on FLUX.3 Image Klein graphs, the Image Edit workflow menu and library pictures as
+Overseer references.
 
 Every JavaScript file also passes `node --check`.
 
@@ -436,4 +444,5 @@ affiliated with any of them.
 The AI models the installer downloads are **not** part of this project and keep their own
 licences, shown on each model's download page: Gemma 4, Qwen3.5 and Qwen3.8
 (Apache-2.0), Qwen-Image 2.1 (Qwen Research License, non-commercial), MiniMax H3
-(MiniMax H3 Community License). Check them before selling what you make.
+(MiniMax H3 Community License). The optional FLUX.3 Image Klein graph uses models under the
+FLUX Kommunity License. Check them before selling what you make.
