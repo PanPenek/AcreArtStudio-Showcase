@@ -238,6 +238,8 @@ The second generation engine, with the same contract as the Perchance driver: `g
 
 Image edits come back at the source picture's size: `matchEditSize` rewires the sampler onto the Qwen encoder's own `<image1>` canvas (the source aspect at about one megapixel) and puts one lanczos `ImageScale` in front of the save node, on a copy of the graph.
 
+`comfy.imageAspect` (Settings → Generation → Image shape) sets every ResolutionSelector's aspect for new renders; comic panels keep their slot's shape and edits keep the source size. A graph without a reference input renders from the prompt alone (`textOnly`); `referencePlan` / `routeJobsForReferences` move jobs with pictures to `comfy.referenceFallbackWorkflow` per `comfy.referenceFallbackMode` (auto / ask / always / textonly), and `editRoute` picks where an edit renders (image workflow → `comfy.editWorkflow` → fallback). An LTX video graph (`comfy.ltxWorkflow`, the fallback video model) gets its own prompt writer and can render without a picture.
+
 Reference pictures go to whichever reference node the graph has: the Qwen-Image 2.1 encoder (`images.image_1…`) or FLUX.3 Image Klein's core `ReferenceMultiLatent` (zero-based `images.image0…`, with `<image1>` in the prompt translated to `<ref_image_0>`). On a FLUX.3 graph the edit canvas is the one `ReferenceMultiLatent` builds from the first picture.
 
 ---
@@ -331,7 +333,10 @@ far more reliable than one asked to plan a whole array of calls.
 
 Two modes: helper (you ask, it acts, it stops) and agent (it wakes on a schedule,
 reviews what happened since last time and works toward a standing brief).
-Tools include make_comic / revise_comic / comic_status and merge_video. When the
+Tools include make_comic / revise_comic / comic_status and merge_video, set_model
+(main or vision model and thinking, through llm.modelInfo) and set_workflow (the
+ComfyUI workflows). The state block carries `models` and `settings.workflows`, and
+overseer.customInstructions (Settings → Make it yours) closes the system prompt. When the
 model returns its reasoning, it is kept with the step and shown collapsed in the
 chat; it is never sent back to the model.
 ```
@@ -339,6 +344,8 @@ chat; it is never sent back to the model.
 ### `src/renderer/overseerui.js` <sub>(581 lines)</sub>
 
 **The Overseer tab: transcript, composer (with image attachments), and the switches that decide what the assistant may do on its own.**
+
+Above the composer an engine bar shows the main model, thinking level, vision model and a context meter; a reference-picture question (mode *Ask me*) appears as buttons under the last message.
 
 Design rule: every tool call is shown, collapsed but always visible. An agent you cannot audit is an agent you cannot trust with a schedule, and "it said it queued ten images" is not the same as "queue_art returned queued: 10".
 
@@ -510,6 +517,6 @@ pixiv refuses requests that are not from a real browser session, so the upload r
 
 ## Tests
 
-`tools/test.mjs` (run with `npm test`) loads the real renderer files into a Node `vm`
+`tools/test.mjs` and the `tools/*_test.mjs` feature suites (all run by `npm test`) load the real renderer files into a Node `vm`
 sandbox with a stub `window`, then calls their exported functions directly. That's the
 same code the app runs, without Electron. See the header of that file for what is covered.

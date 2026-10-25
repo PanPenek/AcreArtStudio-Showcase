@@ -44,6 +44,7 @@ function localProvider(settings) {
     maxConcurrency: 1,
     maxOutputTokens: Number(cfg.maxOutputTokens) || Number(cfg.visionMaxTokens) || 12000,
     reasoningEffort: normalizeEffort(cfg.reasoningEffort || { vision: 'auto', ideation: 'auto', metadata: 'auto', overseer: 'auto' }),
+    contextWindows: (cfg.contextWindows && typeof cfg.contextWindows === 'object') ? { ...cfg.contextWindows } : {},
   };
 }
 
@@ -85,6 +86,7 @@ function cloudProviders(settings) {
         maxConcurrency: Math.max(1, Number(p.maxConcurrency) || (kind === 'cli' ? 2 : 4)),
         maxOutputTokens: Number(p.maxOutputTokens) > 0 ? Number(p.maxOutputTokens) : 8192,
         reasoningEffort: normalizeEffort(p.reasoningEffort),
+        contextWindows: (p.contextWindows && typeof p.contextWindows === 'object') ? { ...p.contextWindows } : {},
       };
     });
 }
@@ -765,6 +767,172 @@ async function listModels(settings, providerId = 'local') {
   return (data.data || data.models || []).map((m) => m.id || m.name).filter(Boolean);
 }
 
+/**
+ * Model info for the Overseer engine bar and set_model: which model answers a role, its
+ * thinking level and its context window. The window is read from what the server reports, in
+ * this order, and the answer says where it came from: a number typed in by hand, the
+ * provider's /models entry, LM Studio's or llama.cpp's own endpoints on a local server, then
+ * OpenRouter's public catalogue for a hosted model that reports nothing. Never a guess.
+ */
+const CATALOG_TTL_MS = 10 * 60 * 1000;
+const CATALOG_FAIL_TTL_MS = 60 * 1000;
+const catalogCache = new Map();
+const probeCache = new Map();
+const OPENROUTER_CATALOG = 'https://openrouter.ai/api/v1/models';
+
+const isLocalUrl = (u) => {
+  try {
+    const h = new URL(u).hostname;
+    return h === 'localhost' || h === '::1' || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h)
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || h.endsWith('.local');
+  } catch { return false; }
+};
+
+const authHeaders = (p) => ({
+  ...(p.auth === 'none' && !p.apiKey ? {} : { Authorization: 'Bearer ' + (p.apiKey || 'none') }),
+  ...(p.headers || {}),
+});
+
+async function getJson(url, headers = {}, ms = 6000) {
+  const resp = await fetch(url, { headers, signal: AbortSignal.timeout(ms) });
+  if (!resp.ok) throw new Error(`${resp.status}`);
+  return resp.json();
+}
+
+function ctxFromEntry(e) {
+  if (!e || typeof e !== 'object') return null;
+  const tp = e.top_provider && typeof e.top_provider === 'object' ? e.top_provider : {};
+  const meta = e.meta && typeof e.meta === 'object' ? e.meta : {};
+  for (const v of [e.loaded_context_length, e.context_length, e.max_model_len, e.context_window,
+    e.max_context_length, e.n_ctx, meta.n_ctx, tp.context_length, e.max_input_tokens, e.input_token_limit, meta.n_ctx_train]) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 512) return Math.round(n);
+  }
+  return null;
+}
+
+async function catalogEntries(p) {
+  if (p.kind === 'cli') throw new Error('this provider is a command, not an endpoint — type the model name or alias it accepts');
+  if (!p.baseUrl) throw new Error('no base URL set');
+  const hit = catalogCache.get(p.baseUrl);
+  if (hit && Date.now() - hit.at < (hit.error ? CATALOG_FAIL_TTL_MS : CATALOG_TTL_MS)) {
+    if (hit.error) throw new Error(hit.error);
+    return hit.entries;
+  }
+  try {
+    const data = await getJson(`${p.baseUrl}/models`, authHeaders(p), 12000);
+    const entries = (data.data || data.models || []).filter((m) => m && (m.id || m.name));
+    catalogCache.set(p.baseUrl, { at: Date.now(), entries });
+    return entries;
+  } catch (e) {
+    const msg = `${p.name} /models: ${e.message}`;
+    catalogCache.set(p.baseUrl, { at: Date.now(), error: msg });
+    throw new Error(msg);
+  }
+}
+
+/** `[{ id, contextWindow, vision }]` for the engine bar's model picker. */
+async function modelCatalog(settings, providerId) {
+  const p = allProviders(settings).find((x) => x.id === providerId);
+  if (!p) throw new Error('unknown provider');
+  const entries = await catalogEntries(p);
+  return entries.map((m) => {
+    const mods = (m.architecture && m.architecture.input_modalities) || m.input_modalities || null;
+    return {
+      id: String(m.id || m.name),
+      contextWindow: ctxFromEntry(m),
+      vision: Array.isArray(mods) ? mods.includes('image') : null,
+    };
+  });
+}
+
+async function openRouterContext(model) {
+  const want = String(model || '').toLowerCase().replace(/^~/, '');
+  if (!want) return null;
+  const fake = { id: 'openrouter-catalog', name: 'OpenRouter catalogue', kind: 'openai', baseUrl: OPENROUTER_CATALOG.replace(/\/models$/, ''), auth: 'none' };
+  const entries = await catalogEntries(fake);
+  const hit = entries.find((m) => String(m.id).toLowerCase() === want)
+    || entries.find((m) => String(m.id).toLowerCase().split('/').pop() === want.split('/').pop());
+  return hit ? ctxFromEntry(hit) : null;
+}
+
+/** `{ tokens, source }` for one provider + model; never throws. */
+async function contextWindowOf(p, model) {
+  const manual = Number((p.contextWindows || {})[model] || (p.contextWindows || {})['*']);
+  if (Number.isFinite(manual) && manual > 0) return { tokens: Math.round(manual), source: 'set by you' };
+  if (p.kind === 'cli') return { tokens: null, source: 'a command-line engine does not report it' };
+  if (!p.baseUrl || !model) return { tokens: null, source: 'no model' };
+  const key = `${p.baseUrl}::${model}`;
+  const hit = probeCache.get(key);
+  if (hit && Date.now() - hit.at < (hit.tokens ? CATALOG_TTL_MS : CATALOG_FAIL_TTL_MS)) return { tokens: hit.tokens, source: hit.source };
+  const done = (tokens, source) => { probeCache.set(key, { at: Date.now(), tokens, source }); return { tokens, source }; };
+
+  try {
+    const entries = await catalogEntries(p);
+    const e = entries.find((m) => (m.id || m.name) === model)
+      || entries.find((m) => String(m.id || m.name).toLowerCase() === String(model).toLowerCase());
+    const n = ctxFromEntry(e);
+    if (n) return done(n, `${p.name} /models`);
+  } catch {  }
+
+  if (isLocalUrl(p.baseUrl)) {
+    const rootUrl = p.baseUrl.replace(/\/v1$/i, '');
+    try {
+      const n = ctxFromEntry(await getJson(`${rootUrl}/api/v0/models/${encodeURIComponent(model)}`, authHeaders(p), 4000));
+      if (n) return done(n, 'LM Studio (loaded context)');
+    } catch {  }
+    try {
+      const props = await getJson(`${rootUrl}/props`, authHeaders(p), 4000);
+      const n = ctxFromEntry((props && props.default_generation_settings) || {}) || ctxFromEntry(props);
+      if (n) return done(n, 'llama.cpp server (n_ctx)');
+    } catch {  }
+    return done(null, 'the local server does not report it — click to set');
+  }
+
+  try {
+    const n = await openRouterContext(model);
+    if (n) return done(n, 'OpenRouter catalogue (same model name)');
+  } catch {  }
+  return done(null, 'not reported by the provider — click to set');
+}
+
+function effortShown(p, role) {
+  if (p.kind === 'cli') {
+    if (!/claude/i.test(p.command || '')) return { effort: null, effortKind: 'none' };
+    const a = p.args || [];
+    const i = a.findIndex((x) => x === '--effort' || /^--effort=/.test(x));
+    const v = i < 0 ? 'auto' : (a[i].includes('=') ? a[i].split('=')[1] : a[i + 1]) || 'auto';
+    return { effort: v, effortKind: 'cli' };
+  }
+  return { effort: effortFor(p, role) || 'auto', effortKind: 'http' };
+}
+
+/** The engine that answers a role right now (first eligible link), with model, thinking and window. */
+async function modelInfo(settings, role = 'overseer') {
+  const route = describeRoute(settings, role);
+  const lead = route.chain[0];
+  const fallbacks = route.chain.slice(1).map((c) => `${c.name}${c.model ? ` · ${c.model}` : ''}`);
+  if (!lead) {
+    return { role, none: true, fallbacks: [], reason: route.skipped.map((s) => `${s.name}: ${s.reason}`).join('; ') || 'no provider configured' };
+  }
+  const p = allProviders(settings).find((x) => x.id === lead.id);
+  const model = modelFor(p, role);
+  const ctx = await contextWindowOf(p, model);
+  return {
+    role,
+    providerId: p.id,
+    provider: p.name,
+    kind: p.kind || 'openai',
+    tier: p.tier,
+    model,
+    vision: !!p.vision,
+    ...effortShown(p, role),
+    contextWindow: ctx.tokens,
+    contextSource: ctx.source,
+    fallbacks,
+  };
+}
+
 async function status(settings) {
   const ep = localProvider(settings);
   try {
@@ -837,6 +1005,7 @@ async function testProvider(settings, { providerId, role = 'vision', base64, mim
 
 module.exports = {
   chat, vision, extractJson, listModels, status, testProvider,
+  modelInfo, modelCatalog, contextWindowOf,
   chainFor, describeRoute, localProvider, isRefusal, isPolicyRefusal, resetCircuit,
   isNativeRefusal, isNativePolicyRefusal, readToolCalls, applyJsonFallback,
   hasImages, stripImages, describeImages,

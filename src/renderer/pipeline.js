@@ -1268,7 +1268,9 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           this.setPhase('Preparing comic references…');
           references = await Comics.jobReferences(job);
         } else if (Array.isArray(job.referenceIds) && job.referenceIds.length) {
-          if (generationDriver === this._comfyDriver) {
+          if (generationDriver === this._comfyDriver && job.referenceRoute === 'textonly' && !job.editOf) {
+            references = job.referenceIds.map((id) => ({ id: String(id) }));
+          } else if (generationDriver === this._comfyDriver) {
             this.setPhase('Preparing searched references…');
             references = await this.researchReferences(job);
           } else if (job.promptSource === 'edit') {
@@ -1293,7 +1295,12 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
           { filters: job.controls, references, shouldStop: () => this._stopRequested, count: Number(job.count) > 0 ? Number(job.count) : 0,
             // An edit (Image Edit tab, 🩹 Fix, Overseer edit_image) comes back at the source size.
             matchSource: !!job.editOf || !!(job.comic && job.comic.edit),
-            aspect: job.aspect || '', workflow: job.workflow || '', variants }, log);
+            aspect: job.aspect || '', workflow: job.workflow || '', variants,
+            referenceRoute: job.referenceRoute || '' }, log);
+        if (result.referenceFallback && window.Models) {
+          job.referenceFallback = result.referenceFallback;
+          job.model = Models.ofJob({ ...job, workflow: result.referenceFallback }, 'comfy');
+        }
         const refResult = result.referenceResult || null;
         job.attachedReferenceIds = refResult ? [...(refResult.attached || [])] : [];
         job.referenceErrors = [

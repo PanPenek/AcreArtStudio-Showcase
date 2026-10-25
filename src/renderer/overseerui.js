@@ -34,6 +34,18 @@
     discard: 'Discarded',
     submit: 'Upload result',
     remember: 'Updated the standing brief',
+    set_model: 'Switched model',
+    set_workflow: 'Switched workflow',
+  };
+
+  const THINK_HTTP = [['auto', 'default'], ['none', 'off'], ['minimal', 'minimal'], ['low', 'low'], ['medium', 'medium'], ['high', 'high']];
+  const THINK_CLI = [['auto', 'default'], ['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'], ['max', 'max']];
+  const kTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(n % 1e6 ? 2 : 0).replace(/\.?0+$/, '')}M`
+    : n >= 1000 ? `${(n / 1000).toFixed(n >= 1e5 ? 0 : 1).replace(/\.0$/, '')}k` : String(n));
+  const parseTok = (s) => {
+    const m = String(s || '').trim().toLowerCase().replace(/[\s,_]/g, '').match(/^(\d+(?:\.\d+)?)([km]?)$/);
+    if (!m) return null;
+    return Math.round(Number(m[1]) * (m[2] === 'm' ? 1e6 : m[2] === 'k' ? 1000 : 1));
   };
 
   const OverseerUI = {
@@ -67,6 +79,12 @@
           if (prompt) window.ala.clip.text(prompt).then(() => window.toast?.('Prompt copied.', 'ok'));
           return;
         }
+        const choice = e.target.closest('[data-ov-choice]');
+        if (choice) {
+          choice.closest('.ov-choice')?.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+          O()?.answerChoice(choice.dataset.ovChoice);
+          return;
+        }
         const att = e.target.closest('[data-ov-att]');
         if (att) { att.classList.toggle('big'); return; }
         const think = e.target.closest('.ov-think-head');
@@ -75,6 +93,13 @@
         if (head) { head.parentElement.classList.toggle('open'); return; }
         if (e.target.closest('[data-ov]')) this.onStripClick(e);
       });
+
+      const eng = $('#ov-engine');
+      if (eng) {
+        eng.addEventListener('click', (e) => this.onEngineClick(e));
+        eng.addEventListener('change', (e) => this.onEngineChange(e));
+      }
+      State.on('llm', () => this.renderEngine());
 
       State.on('overseer', () => this.render());
       State.on('queue', () => this.renderStrip());
@@ -89,6 +114,7 @@
       const el = $('#ov-input');
       if (el) el.focus();
       this.refreshVision();
+      this.maybeRefreshEngines(true);
     },
 
     /** Can the Overseer's chain read pictures at all? */
@@ -258,7 +284,237 @@
       if (!$('#pane-overseer')) return;
       this.renderModes();
       this.renderStrip();
+      this.renderEngine();
+      this.maybeRefreshEngines();
       this.renderThread();
+    },
+
+    engineSig() {
+      const s = State.settings || {};
+      const lm = s.lmStudio || {};
+      return JSON.stringify([
+        (s.routing || {}).overseer, (s.routing || {}).vision, (s.routing || {}).fallbackLocal,
+        (s.providers || []).map((p) => [p.id, p.name, p.enabled, p.vision, p.models, p.model, p.reasoningEffort, p.args, p.contextWindows, p.roles]),
+        lm.models, lm.model, lm.reasoningEffort, lm.contextWindows, lm.baseUrl,
+      ]);
+    },
+
+    async maybeRefreshEngines(force = false) {
+      const ov = O();
+      if (!ov || !ov.refreshEngines || this._engBusy) return;
+      const sig = this.engineSig();
+      const stale = !ov._engines || Date.now() - ov._engines.at > 5 * 60_000;
+      if (!force && sig === this._engSig && !stale) return;
+      this._engSig = sig;
+      this._engBusy = true;
+      try { await ov.refreshEngines(); } catch {  }
+      this._engBusy = false;
+      this.renderEngine();
+    },
+
+    renderEngine() {
+      const root = $('#ov-engine');
+      if (!root) return;
+      const ov = O();
+      const e = (ov && ov._engines) || null;
+      const m = e && e.main;
+      const v = e && e.vision;
+      const chip = (role, x, label) => {
+        const what = !x ? 'reading…'
+          : x.none ? '<em>nothing can answer</em>'
+            : `<b>${esc(x.provider)}</b> · ${esc(x.model || 'its default')}`;
+        const tip = !x ? '' : x.none ? `Nothing in the route can answer: ${x.reason || ''}`
+          : `${label}: ${x.provider} · ${x.model || 'its default'}${x.fallbacks && x.fallbacks.length ? `\nIf it fails: ${x.fallbacks.join(' → ')}` : ''}\n${role === 'vision'
+            ? 'The vision model inspects every render (QC) and reads attached pictures for a text-only main model.'
+            : 'The model the Overseer itself runs on.'}\nClick to switch.`;
+        return `<button class="ov-eng-chip" data-ov-eng="${role}" title="${esc(tip)}"><span class="ov-k">${label}</span><span class="ov-eng-v">${what}</span><span class="ov-eng-caret">▾</span></button>`;
+      };
+      const kind = m && !m.none ? m.effortKind : 'none';
+      const opts = kind === 'cli' ? THINK_CLI : THINK_HTTP;
+      const cur = m && !m.none ? (m.effort || 'auto') : 'auto';
+      const think = `<label class="ov-eng-think" title="${esc(kind === 'none' ? 'This engine has no thinking switch the app can set.'
+        : 'How hard the main model may think before it answers. Thinking tokens are billed as output and add wait.')}"><span class="ov-k">Thinking</span>
+        <select data-ov-think ${kind === 'none' || !m || m.none ? 'disabled' : ''}>${opts.map(([val, t]) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${t}</option>`).join('')}
+          ${opts.some(([val]) => val === cur) ? '' : `<option value="${esc(cur)}" selected>${esc(cur)}</option>`}</select></label>`;
+
+      const win = m && !m.none ? m.contextWindow : null;
+      const msgs = (ov && ov.messages) || [];
+      const used = msgs.length && ov && ov.contextUsed ? ov.contextUsed() : (msgs.length ? null : 0);
+      const pct = win && used != null ? Math.min(100, (used / win) * 100) : null;
+      const level = pct == null ? '' : pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : '';
+      const ctxTip = `${used != null ? `${num(used)} tokens in the last step (the provider's own count: system prompt + conversation + state block + reply).` : 'Fills in after the first reply this session.'}\n`
+        + `${win ? `Window: ${num(win)} tokens — ${m.contextSource}.` : `Window: unknown — ${(m && m.contextSource) || 'no engine'}.`}\nClick to set the window by hand.`;
+      const ctx = `<button class="ov-ctx ${level}" data-ov-ctx title="${esc(ctxTip)}"><span class="ov-k">Context</span>
+        <span class="ov-ctx-bar"><i style="width:${pct == null ? 0 : Math.max(pct, used ? 1.5 : 0).toFixed(1)}%"></i></span>
+        <span class="ov-ctx-n">${used != null ? kTok(used) : '—'} / ${win ? kTok(win) : '?'}${pct != null ? ` · ${pct < 1 && used ? '<1' : Math.round(pct)}%` : ''}</span></button>`;
+
+      const html = `${chip('main', m, 'Model')}${think}${chip('vision', v, 'Vision')}${ctx}`;
+      if (html !== this._engHtml) { root.innerHTML = html; this._engHtml = html; }
+    },
+
+    async onEngineChange(e) {
+      const sel = e.target.closest('[data-ov-think]');
+      if (sel) {
+        const r = await O().setModel({ role: 'main', thinking: sel.value }, { fromUi: true });
+        this.engineToast(r, 'Thinking');
+        return;
+      }
+      if (e.target.id === 'ov-eng-prov') this.fillEnginePop(e.target.value);
+      if (e.target.id === 'ov-eng-model') this.paintModelHint();
+    },
+
+    async onEngineClick(e) {
+      const role = e.target.closest('[data-ov-eng]');
+      if (role) { this.openEnginePop(role.dataset.ovEng); return; }
+      if (e.target.closest('[data-ov-ctx]')) { this.editContext(); return; }
+      const act = e.target.closest('[data-ov-eng-act]');
+      if (!act) return;
+      if (act.dataset.ovEngAct === 'cancel') { this.closeEnginePop(); return; }
+      if (act.dataset.ovEngAct === 'apply') await this.applyEnginePop();
+    },
+
+    engineToast(r, what) {
+      if (!r) return;
+      if (r.ok) {
+        window.toast?.(r.changed ? `${what}: ${r.to}${r.notes ? ` (${r.notes.join('; ')})` : ''}` : `${what}: already ${r.to}`, 'ok');
+      } else {
+        window.toast?.(`${r.error || 'Could not switch.'}${r.candidates ? ` — ${r.candidates.slice(0, 4).join(', ')}…` : ''}`, 'err');
+      }
+    },
+
+    closeEnginePop() {
+      const pop = $('#ov-engine-pop');
+      if (pop) pop.remove();
+      this._engPop = null;
+    },
+
+    async openEnginePop(role) {
+      if (this._engPop && this._engPop.role === role) { this.closeEnginePop(); return; }
+      this.closeEnginePop();
+      const ov = O();
+      const cur = ov._engines && ov._engines[role === 'vision' ? 'vision' : 'main'];
+      const route = await window.ala.llm.route(role === 'vision' ? 'vision' : 'overseer').catch(() => null);
+      const rows = ((route && route.order) || []).map((r) => ({
+        ...r, pickable: r.eligible || r.reason === 'no model set for this role',
+      }));
+      this._engPop = { role, rows, catalog: new Map() };
+      const pop = document.createElement('div');
+      pop.id = 'ov-engine-pop';
+      pop.className = 'ov-eng-pop';
+      pop.innerHTML = `
+        <div class="ov-eng-pop-head"><b>${role === 'vision' ? 'Vision model' : 'Main model'}</b>
+          <span class="hint">${role === 'vision' ? 'inspects every render (QC) and reads pictures for a text-only main model' : 'the model the Overseer itself runs on'} · the rest of the route stays behind it as fallback</span></div>
+        <div class="ov-eng-pop-grid">
+          <label class="fld"><span>Provider</span><select id="ov-eng-prov">${rows.map((r) => `<option value="${esc(r.id)}" ${r.pickable ? '' : 'disabled'} ${cur && r.id === cur.providerId ? 'selected' : ''}>${esc(r.name)}${r.pickable ? '' : ` — ${esc(r.reason)}`}</option>`).join('')}</select></label>
+          <label class="fld ov-eng-model-fld"><span>Model <em id="ov-eng-model-hint"></em></span><input id="ov-eng-model" list="ov-eng-models" spellcheck="false" autocomplete="off" placeholder="model id — type to search the provider's list" /><datalist id="ov-eng-models"></datalist></label>
+          <label class="fld"><span>Thinking</span><select id="ov-eng-think"></select></label>
+        </div>
+        <div class="ov-eng-pop-foot"><span class="hint" id="ov-eng-pop-msg"></span>
+          <button class="btn ghost small" data-ov-eng-act="cancel">Cancel</button>
+          <button class="btn primary small" data-ov-eng-act="apply">Use this</button></div>`;
+      $('#ov-engine').after(pop);
+      pop.addEventListener('click', (e) => this.onEngineClick(e));
+      pop.addEventListener('change', (e) => this.onEngineChange(e));
+      pop.addEventListener('input', (e) => { if (e.target.id === 'ov-eng-model') this.paintModelHint(); });
+      pop.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') this.closeEnginePop();
+        if (e.key === 'Enter' && e.target.id === 'ov-eng-model') { e.preventDefault(); this.applyEnginePop(); }
+      });
+      const first = (cur && rows.find((r) => r.id === cur.providerId && r.pickable)) || rows.find((r) => r.pickable);
+      if (first) { $('#ov-eng-prov').value = first.id; this.fillEnginePop(first.id); }
+      else $('#ov-eng-pop-msg').textContent = 'No provider can serve this role — set one up in Settings → Providers.';
+    },
+
+    async fillEnginePop(providerId) {
+      const st = this._engPop;
+      if (!st) return;
+      const s = State.settings || {};
+      const role = st.role === 'vision' ? 'vision' : 'overseer';
+      const p = providerId === 'local' ? null : (s.providers || []).find((x) => x.id === providerId);
+      const lm = s.lmStudio || {};
+      const curModel = providerId === 'local' ? ((lm.models || {})[role] || lm.model || '') : ((p && ((p.models || {})[role] || p.model)) || '');
+      const isCli = p && p.kind === 'cli';
+      const input = $('#ov-eng-model');
+      input.value = curModel;
+      const think = $('#ov-eng-think');
+      const opts = isCli ? THINK_CLI : THINK_HTTP;
+      let curEff = 'auto';
+      if (isCli) {
+        const a = Array.isArray(p.args) ? p.args : [];
+        const i = a.findIndex((x) => x === '--effort' || /^--effort=/.test(x));
+        if (i >= 0) curEff = a[i].includes('=') ? a[i].split('=')[1] : (a[i + 1] || 'auto');
+      } else {
+        const raw = providerId === 'local' ? lm.reasoningEffort : p && p.reasoningEffort;
+        const val = raw && typeof raw === 'object' ? raw[role] : raw;
+        curEff = String(val || (providerId === 'local' ? 'auto' : (role === 'vision' ? 'auto' : 'none'))).toLowerCase();
+      }
+      const cliNoEffort = isCli && !/claude/i.test(p.command || '');
+      think.innerHTML = opts.map(([v, t]) => `<option value="${v}" ${v === curEff ? 'selected' : ''}>${t}</option>`).join('');
+      think.disabled = cliNoEffort;
+      const dl = $('#ov-eng-models');
+      dl.innerHTML = '';
+      const msg = $('#ov-eng-pop-msg');
+      if (isCli) {
+        msg.textContent = 'A command-line engine has no model list: leave the model blank for its default, or type a name/alias it accepts.';
+        this.paintModelHint();
+        return;
+      }
+      msg.textContent = 'Reading the provider\'s model list…';
+      let cat = st.catalog.get(providerId);
+      if (!cat) {
+        cat = await window.ala.llm.catalog(providerId).catch((e) => ({ error: String(e.message || e).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '') }));
+        st.catalog.set(providerId, cat);
+      }
+      if (this._engPop !== st || $('#ov-eng-prov').value !== providerId) return;
+      if (Array.isArray(cat)) {
+        const list = role === 'vision' ? cat.filter((c) => c.vision !== false) : cat;
+        dl.innerHTML = list.slice(0, 2000).map((c) => `<option value="${esc(c.id)}">${c.contextWindow ? `${kTok(c.contextWindow)} context` : ''}${c.vision ? ' · sees images' : ''}</option>`).join('');
+        msg.textContent = `${list.length} model(s) on this provider${role === 'vision' && list.length < cat.length ? ` (${cat.length - list.length} text-only hidden)` : ''}.`;
+      } else {
+        msg.textContent = `Could not read the model list (${cat.error}). Type the model id.`;
+      }
+      this.paintModelHint();
+    },
+
+    paintModelHint() {
+      const st = this._engPop;
+      const hint = $('#ov-eng-model-hint');
+      if (!st || !hint) return;
+      const cat = st.catalog.get($('#ov-eng-prov').value);
+      const id = $('#ov-eng-model').value.trim();
+      const hit = Array.isArray(cat) ? cat.find((c) => c.id === id) : null;
+      hint.textContent = hit ? `${hit.contextWindow ? `(${kTok(hit.contextWindow)} context${hit.vision ? ', sees images' : ''})` : (hit.vision ? '(sees images)' : '')}` : (id && Array.isArray(cat) ? '(not in its list)' : '');
+    },
+
+    async applyEnginePop() {
+      const st = this._engPop;
+      if (!st) return;
+      const provider = $('#ov-eng-prov').value;
+      const model = $('#ov-eng-model').value.trim();
+      const thinkSel = $('#ov-eng-think');
+      const thinking = thinkSel.disabled ? '' : thinkSel.value;
+      const btn = document.querySelector('[data-ov-eng-act="apply"]');
+      if (btn) btn.disabled = true;
+      const r = await O().setModel({ role: st.role, provider, model, thinking }, { fromUi: true })
+        .catch((e) => ({ ok: false, error: e.message }));
+      if (btn) btn.disabled = false;
+      this.engineToast(r, st.role === 'vision' ? 'Vision' : 'Model');
+      if (r && r.ok) { this.closeEnginePop(); this._engSig = this.engineSig(); this.renderEngine(); }
+      else if (r) $('#ov-eng-pop-msg').textContent = r.error || 'Could not switch.';
+    },
+
+    async editContext() {
+      const ov = O();
+      const m = ov._engines && ov._engines.main;
+      if (!m || m.none) return;
+      const next = await askText(`Context window of ${m.model || m.provider}, in tokens (e.g. 128k, 1M). Leave blank to read it from the provider again.\nNow: ${m.contextWindow ? num(m.contextWindow) : 'unknown'} — ${m.contextSource}.`,
+        m.contextSource === 'set by you' && m.contextWindow ? String(m.contextWindow) : '');
+      if (next == null) return;
+      const n = String(next).trim() ? parseTok(next) : 0;
+      if (n == null || (n && n < 512)) { window.toast?.('That is not a token count — try 128k, 1M or 131072.', 'err'); return; }
+      await ov.setContextWindow(n);
+      this._engSig = this.engineSig();
+      this.renderEngine();
     },
 
     renderModes() {
@@ -357,7 +613,7 @@
       const msgs = (ov && ov.messages) || [];
       const near = root.scrollHeight - root.scrollTop - root.clientHeight < 120;
 
-      if (!msgs.length) {
+      if (!msgs.length && !(ov && ov.pendingChoice)) {
         const waiting = (State.library || [])
           .filter((c) => c.promptSource === 'overseer' && c.status === 'review').length;
         root.innerHTML = `<div class="ov-empty">
@@ -377,9 +633,21 @@
       }
 
       root.innerHTML = msgs.map((m) => this.msgHtml(m)).join('')
+        + this.choiceHtml(ov)
         + (ov && ov.busy ? `<div class="ov-msg agent thinking"><div class="ov-bubble" id="ov-working">${esc(this.workingLabel())}</div></div>` : '');
       this.hydrateResearchPreviews(root);
       if (near) root.scrollTop = root.scrollHeight;
+    },
+
+    choiceHtml(ov) {
+      const c = ov && ov.pendingChoice;
+      if (!c) return '';
+      const mins = Math.max(1, Math.round((c.until - Date.now()) / 60000));
+      return `<div class="ov-msg agent ov-choice" data-choice-id="${esc(c.id)}"><div class="ov-bubble">${esc(c.text)}
+        <div class="ov-actions">${(c.buttons || []).map((b) =>
+          `<button class="btn small ${b.primary ? 'primary' : b.key === 'always' ? 'ghost' : ''}" data-ov-choice="${esc(b.key)}">${esc(b.label)}</button>`).join('')}
+          <span class="hint">No answer in ${mins} min → ${esc((c.buttons && c.buttons[0] && c.buttons[0].label) || 'the first option')}</span></div>
+      </div></div>`;
     },
 
     /** What the thinking bubble says while a turn is in flight. */
@@ -572,6 +840,8 @@
         case 'read_stats': return `${num(r.published)} published, ${num(r.views)} views`;
         case 'learn': return r.summary || '';
         case 'remember': return r.brief || '';
+        case 'set_model': return r.changed ? `${r.role}: ${r.from} → ${r.to}` : r.current ? `${r.role}: ${r.current}` : (r.to ? `${r.role}: ${r.to}` : '');
+        case 'set_workflow': return r.changed ? `${r.kind}: ${r.from} → ${r.to}` : r.current ? `${r.kind}: ${r.current}` : '';
         default: return '';
       }
     },

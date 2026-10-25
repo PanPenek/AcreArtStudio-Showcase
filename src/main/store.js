@@ -160,9 +160,13 @@ const DEFAULT_SETTINGS = {
     workflowsDir: '',
     imageWorkflow: '',
     videoWorkflow: '',
+    ltxWorkflow: '',
     editWorkflow: '',
+    referenceFallbackWorkflow: '',
+    referenceFallbackMode: 'auto',
     imagesPerPrompt: 6,
     promptVariants: 3,
+    imageAspect: '',
     maxReferences: 4,
     launchCommand: '',
     autoGif: false,
@@ -212,6 +216,7 @@ const DEFAULT_SETTINGS = {
     enabled: false,
     mode: 'helper',
     brief: '',
+    customInstructions: '',
     imagesPerRun: 6,
     maxSteps: 20,
     // 'auto' offers native tool calling and falls back per engine to the JSON envelope;
@@ -431,6 +436,7 @@ function migrate(s) {
   migrateLabProfiles(s);
   migrateTitleSimilarity(s);
   migrateOverseerRole(s);
+  migrateReferenceModeAuto(s);
   migrateOverseerSteps(s);
 }
 
@@ -442,6 +448,14 @@ function migrateOverseerSteps(s) {
   if (o.toolProtocol === undefined) o.toolProtocol = 'auto';
   if (!o.turnBudget || typeof o.turnBudget !== 'object') o.turnBudget = { tokens: 300000 };
   o.stepsMigratedAt = Date.now();
+}
+
+/** Move the reference-picture mode from 'ask' to 'auto' once; a mode chosen later stays. */
+function migrateReferenceModeAuto(s) {
+  const c = s && s.comfy;
+  if (!c || c.referenceModeAutoV1) return;
+  if (!c.referenceFallbackMode || c.referenceFallbackMode === 'ask') c.referenceFallbackMode = 'auto';
+  c.referenceModeAutoV1 = true;
 }
 
 /** Give the new 'overseer' role something to run on. */

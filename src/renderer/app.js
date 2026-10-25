@@ -3350,6 +3350,11 @@
       <div class="teaser-body">
         <div class="teaser-preview"><img src="${esc(card.url)}" style="max-height:100%;object-fit:contain" /></div>
         <div class="teaser-controls">
+          ${comfyCfg.ltxWorkflow ? `<label class="teaser-field">Video model
+            <select id="cv-model">
+              <option value="h3" selected>FastH3 — fast (~2 min per 10 s)</option>
+              <option value="ltx">Fallback video model — best consistency and quality (~5 min per 10 s)</option>
+            </select></label>` : ''}
           <label class="teaser-field">Motion prompt mode
             <select id="cv-mode">
               <option value="auto" selected>Auto — the model looks at the image and writes it</option>
@@ -3389,10 +3394,20 @@
     const writeBtn = $('#cv-write');
     const userBox = $('#cv-user');
     const secondsBox = $('#cv-seconds');
+    const modelSel = $('#cv-model');
+    const pickedModel = () => (modelSel && modelSel.value === 'ltx' ? 'ltx' : 'h3');
+    const pickedWorkflow = () => (pickedModel() === 'ltx' ? comfyCfg.ltxWorkflow : comfyCfg.videoWorkflow);
+    if (modelSel) modelSel.addEventListener('change', () => {
+      if (finalBox.value.trim()) {
+        status.textContent = `Model changed to ${pickedModel() === 'ltx' ? 'the fallback video model' : 'FastH3'} — press Write prompt again for its prompt format (or keep your text).`;
+        status.className = 'hint';
+      }
+    });
     const seconds = () => { const n = Number(secondsBox && secondsBox.value); return n > 0 ? n : null; };
     let busy = false;
     const updateControls = () => {
       writeBtn.disabled = modeSel.disabled = userBox.disabled = finalBox.disabled = busy;
+      if (modelSel) modelSel.disabled = busy;
       renderBtn.disabled = busy || !finalBox.value.trim();
     };
     finalBox.addEventListener('input', updateControls);
@@ -3417,7 +3432,7 @@
           prompt = userText;
           if (!prompt) throw new Error('type a prompt first');
         } else {
-          const r = await window.ComfyUI.writeVideoPrompt({ base64, mime, userText, mode, seconds: seconds() });
+          const r = await window.ComfyUI.writeVideoPrompt({ base64, mime, userText, mode, seconds: seconds(), model: pickedModel() });
           prompt = r.prompt;
         }
         finalBox.value = prompt;
@@ -3443,7 +3458,7 @@
       try {
         if (!base64) base64 = await window.ala.files.readImageBase64(card.fname);
         const d = new window.ComfyDriver(State.settings);
-        const res = await d.convertToVideo({ base64, mime, prompt, seconds: seconds(), log: (m) => State.addLog(m, 'comfy') });
+        const res = await d.convertToVideo({ base64, mime, prompt, workflow: pickedWorkflow(), seconds: seconds(), log: (m) => State.addLog(m, 'comfy') });
         if (card.video) window.ala.comfy.deleteVideo(card.video.fname).catch(() => {});
         if (card.gif) window.ala.comfy.deleteGif(card.gif.fname).catch(() => {});
         card.video = { url: res.url, fname: res.fname, prompt, at: Date.now() };
@@ -5380,11 +5395,14 @@
       <div class="fld-row">
         <label class="fld"><span>Image workflow <em>(text-to-image)</em></span><select data-set="comfy.imageWorkflow" id="sel-comfy-imgwf"></select></label>
         <label class="fld"><span>Video workflow <em>(image-to-video)</em></span><select data-set="comfy.videoWorkflow" id="sel-comfy-vidwf"></select></label>
+        <label class="fld"><span>Fallback video model <em>(optional second video workflow — slower, better consistency; also text-only)</em></span><select data-set="comfy.ltxWorkflow" id="sel-comfy-ltxwf"></select></label>
       </div>
       <div class="note">Any ComfyUI workflow works — the app traces the prompt slot(s) back from the sampler, randomizes its seed, and collects whatever the save nodes report. Swap a file in for a different one and generation keeps working unchanged; both API-format and editor-format .json are accepted.</div>
       <div class="fld-row">
         <label class="fld slim"><span>Images per prompt <em>(one render each, its own random seed)</em></span><input type="number" min="1" max="12" data-set="comfy.imagesPerPrompt" value="${s.comfy?.imagesPerPrompt ?? 6}" /></label>
         <label class="fld slim"><span>Max searched references <em>(per job; each one costs render time, 16 max)</em></span><input type="number" min="1" max="16" data-set="comfy.maxReferences" value="${s.comfy?.maxReferences ?? 4}" /></label>
+        <label class="fld slim" title="Sets the shape on the workflow's ResolutionSelector; the pixel count (megapixels) stays what the workflow says. Sizes shown are for 1 MP. Comic panels keep their slot's shape and edits keep the source picture's size."><span>Image shape <em>(resolution of new pictures)</em></span>
+          <select data-set="comfy.imageAspect">${imageAspectOptions(s.comfy?.imageAspect || '')}</select></label>
       </div>
       <div class="note">The prompt is written <b>once</b> and the graph rendered this many times, each pass with its own random seed — the Perchance page's six, without asking the model for six prompts. So this buys GPU time and no extra language-model calls, which is what makes it affordable in ComfyUI mode where the prompt writer has to be a cloud model. Each picture still gets its own card, its own QC pass and its own metadata. <em>1</em> is the old one-picture-per-prompt behaviour; the driver caps it at 12.</div>
       <div class="note">When Overseer found and verified picture references online, its queued prompts carry those image ids into the job: the app downloads them through the safe research bridge, uploads them to ComfyUI and wires them into the workflow's reference sockets — <b>one</b> reference or several, up to the number above. Text-only jobs upload nothing. A job that selected more than this still renders; the extra references are listed on the card as left out, not as an error. Cost is paid per picture and roughly proportional to the count: measured here at 1024² / 40 steps, no reference ≈ 1 min, one ≈ 1 min, four ≈ 5 min, eight ≈ 11 min — about +80 s per reference per render, before multiplying by <em>Images per prompt</em>.</div>
@@ -5866,6 +5884,37 @@
     </div>`) +
 
     sec('overseer', `
+    <div class="panel" data-find="overseer customise customize personality tone instructions rules make it yours">
+      <h3>Make it yours</h3>
+      <p class="panel-sub">How your Overseer talks and the rules it keeps in every chat and every unattended run.</p>
+      <label class="fld"><span>Your instructions <em>— personality, tone and standing rules</em></span>
+        <textarea rows="5" maxlength="4000" data-set="overseer.customInstructions" placeholder="e.g. Talk casually and keep replies short. Always make 6 pictures per prompt. Character pictures get one reference. Ask before anything is published.">${esc(s.overseer?.customInstructions || '')}</textarea></label>
+      <div class="note">Added to every turn, after the app's own rules, so yours win where they differ. Publishing
+        still needs your OK and the quality gate whatever is written here. The standing brief below is
+        <b>what</b> it works on when nobody asks; this is <b>how</b> it works.</div>
+    </div>
+
+    <div class="panel" data-find="overseer reference pictures fallback text-only moss workflow qwen">
+      <h3>Reference pictures on a text-only model</h3>
+      <p class="panel-sub">For image workflows that only read text (MOSS-Image): what a job with reference pictures does.</p>
+      <div class="fld-row">
+        <label class="fld"><span>Fallback workflow <em>— must take pictures</em></span>
+          <select data-set="comfy.referenceFallbackWorkflow" id="sel-comfy-reffb"></select></label>
+        <label class="fld" style="max-width:300px"><span>When a job has reference pictures</span>
+          <select data-set="comfy.referenceFallbackMode">
+            <option value="auto" ${!['ask', 'always', 'textonly'].includes(s.comfy?.referenceFallbackMode) ? 'selected' : ''}>Text only, unless I ask to use the picture as input</option>
+            <option value="ask" ${s.comfy?.referenceFallbackMode === 'ask' ? 'selected' : ''}>Ask me</option>
+            <option value="always" ${s.comfy?.referenceFallbackMode === 'always' ? 'selected' : ''}>Always use the fallback</option>
+            <option value="textonly" ${s.comfy?.referenceFallbackMode === 'textonly' ? 'selected' : ''}>Ignore the pictures (text only)</option>
+          </select></label>
+      </div>
+      <div class="note">Only that job moves to the fallback; your image workflow stays as it is. By default jobs just
+        render from the prompt; tell the Overseer to use the reference picture as input and those jobs take the fallback.
+        With "Ask me", the Overseer asks with buttons under its message. Image edits always need the
+        picture: they use your image workflow when it can edit, else the Image Edit workflow, else this fallback.
+        Nothing changes while the image workflow takes pictures itself.</div>
+    </div>
+
     <div class="panel" data-find="overseer agent chat schedule brief unattended autonomous">
       <h3>Agent mode</h3>
       <p class="panel-sub">When the Overseer wakes on its own, and what it works on.</p>
@@ -6319,10 +6368,14 @@
     for (const [selId, current] of [
       ['#sel-comfy-imgwf', s.comfy?.imageWorkflow],
       ['#sel-comfy-vidwf', s.comfy?.videoWorkflow],
+      ['#sel-comfy-ltxwf', s.comfy?.ltxWorkflow],
+      ['#sel-comfy-reffb', s.comfy?.referenceFallbackWorkflow],
     ]) {
       const sel = $(selId);
       if (!sel) continue;
-      let opts = `<option value="">(none)</option>` + files
+      const list = selId === '#sel-comfy-reffb'
+        ? files.filter((f) => !/ltx|i2v|video|minimax|fasth3/i.test(f)) : files;
+      let opts = `<option value="">${selId === '#sel-comfy-reffb' ? '(none — never switch)' : '(none)'}</option>` + list
         .map((f) => `<option value="${esc(f)}" ${f === current ? 'selected' : ''}>${esc(f)}</option>`).join('');
       if (current && !files.includes(current)) {
         opts += `<option value="${esc(current)}" selected>⚠ ${esc(current)} — not in folder</option>`;
@@ -6398,6 +6451,22 @@
       out.textContent = 'Could not reach it: ' + e.message;
       out.className = 'hint err';
     }
+  }
+
+  function imageAspectOptions(current) {
+    const list = (window.ComfyUI && window.ComfyUI.ASPECTS) || [['1:1 (Square)', 1], ['2:3 (Portrait Photo)', 2 / 3]];
+    const RATIO = { '1:1': [1, 1], '2:3': [2, 3], '3:2': [3, 2], '3:4': [3, 4], '4:3': [4, 3], '9:16': [9, 16], '16:9': [16, 9], '21:9': [21, 9] };
+    const size = (label) => {
+      const r = RATIO[String(label).split(' ')[0]];
+      if (!r) return '';
+      const k = Math.sqrt((1024 * 1024) / (r[0] * r[1]));
+      return ` — ${Math.round((r[0] * k) / 8) * 8}×${Math.round((r[1] * k) / 8) * 8}`;
+    };
+    const note = { '2:3 (Portrait Photo)': ', Perchance\'s shape', '1:1 (Square)': '', '9:16 (Portrait Widescreen)': ', phone screen' };
+    const opts = [['', "Workflow's own size (as the file says)"],
+      ...list.map(([l]) => [l, `${l}${size(l)}${note[l] || ''}`])];
+    if (current && !opts.some(([v]) => v === current)) opts.push([current, current]);
+    return opts.map(([v, t]) => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(t)}</option>`).join('');
   }
 
   function wireSettings() {

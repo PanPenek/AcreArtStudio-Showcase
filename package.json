@@ -1,14 +1,14 @@
 {
   "name": "acre-art-studio-showcase",
   "productName": "Acre Art Studio",
-  "version": "3.1.0",
+  "version": "3.8.0",
   "description": "Acre Art Studio: an AI art creation studio. Write prompts, generate images, AI quality check, review, publish.",
   "main": "src/main/main.js",
   "author": "PanPenek",
   "license": "GPL-3.0-only",
   "scripts": {
     "start": "electron .",
-    "test": "node tools/test.mjs",
+    "test": "node tools/test.mjs && node tools/overseer_toolcall_test.mjs && node tools/references_vision_test.mjs && node tools/image_aspect_setting_test.mjs && node tools/textonly_reference_test.mjs && node tools/reference_fallback_test.mjs && node tools/edit_routing_test.mjs && node tools/reference_intent_test.mjs && node tools/overseer_model_switch_test.mjs && node tools/overseer_ltx_video_test.mjs",
     "start:debug": "electron . --remote-debugging-port=9335",
     "setup": "node tools/setup.mjs"
   },

@@ -485,6 +485,13 @@
     return null;
   }
 
+  /** 'ltx' when the video graph is an LTX one (the fallback video model), else 'h3' (FastH3). */
+  const LTX_VIDEO_RE = /^LTXV2\d*ImgToVideo$/;
+  function videoModelOf(wf) {
+    const nodes = (wf && (wf.nodes || wf)) || {};
+    return Object.values(nodes).some((n) => n && LTX_VIDEO_RE.test(n.classType || n.class_type || '')) ? 'ltx' : 'h3';
+  }
+
   const ASPECTS = [
     ['1:1 (Square)', 1], ['2:3 (Portrait Photo)', 2 / 3], ['3:2 (Photo)', 3 / 2],
     ['3:4 (Portrait Standard)', 3 / 4], ['4:3 (Standard)', 4 / 3],
@@ -598,6 +605,52 @@
   };
   const qwenReferenceTarget = (nodes) => Object.entries(nodes || {})
     .find(([, n]) => n && (n.classType === 'TextEncodeQwenImage21' || n.classType === 'ReferenceMultiLatent'));
+
+  /** Reference fallback settings (Settings → Overseer → Reference pictures on a text-only model). */
+  const REFERENCE_FALLBACK_MODES = ['auto', 'ask', 'always', 'textonly'];
+  const referenceFallbackOf = (cfg) => {
+    const c = cfg || {};
+    const mode = String(c.referenceFallbackMode || '').trim();
+    return {
+      workflow: String(c.referenceFallbackWorkflow || '').trim(),
+      mode: REFERENCE_FALLBACK_MODES.includes(mode) ? mode : 'auto',
+    };
+  };
+  const workflowLabel = (file) => String(file || '').replace(/\.json$/i, '')
+    .replace(/_?Text_and_Reference$/i, '').replace(/_?Text(_to_Image)?$/i, '')
+    .replace(/[_]+/g, ' ').replace(/\b(Image|SFT|int8|Official)\b/gi, '').replace(/\s+/g, ' ').trim() || String(file || '');
+  const rawTakesReferences = (raw) => /"(TextEncodeQwenImage21|ReferenceMultiLatent)"/.test(JSON.stringify(raw || {}));
+
+  /**
+   * Jobs with reference pictures on a text-only image workflow: move them to the fallback
+   * (job.workflow) or mark them text-only (job.referenceRoute), following the mode; 'ask' asks.
+   */
+  async function routeJobsForReferences(jobs, { driver = null, ask = null, unattended = false, wantsPicture = false } = {}) {
+    const cand = (jobs || []).filter((j) => j && Array.isArray(j.referenceIds) && j.referenceIds.length
+      && !j.editOf && j.promptSource !== 'edit' && !j.comic && !String(j.workflow || '').trim());
+    if (!cand.length || !driver || typeof driver.referencePlan !== 'function') return null;
+    const plan = await driver.referencePlan();
+    if (!plan || !plan.needed) return null;
+    let choice;
+    let how;
+    if (plan.mode === 'textonly') { choice = 'textonly'; how = 'setting'; }
+    else if (!plan.fallbackOk) { choice = 'textonly'; how = 'no-fallback'; }
+    else if (plan.mode === 'always') { choice = 'fallback'; how = 'setting'; }
+    else if (plan.mode === 'auto') { choice = wantsPicture ? 'fallback' : 'textonly'; how = wantsPicture ? 'words' : 'default'; }
+    else if (unattended || typeof ask !== 'function') { choice = 'fallback'; how = 'unattended'; }
+    else {
+      const a = (await ask(plan, cand.length)) || {};
+      choice = ['fallback', 'textonly', 'cancel'].includes(a.choice) ? a.choice : 'fallback';
+      how = a.how || 'asked';
+    }
+    if (choice !== 'cancel') {
+      for (const j of cand) {
+        if (choice === 'fallback') { j.workflow = plan.fallback; delete j.referenceRoute; }
+        else j.referenceRoute = 'textonly';
+      }
+    }
+    return { ...plan, choice, how, jobs: cand.length };
+  }
 
   /**
    * Two reference sockets exist. Qwen-Image 2.1 takes its pictures on the text encoder as
@@ -763,6 +816,7 @@
         autoGif: false,
         imagesPerPrompt: 1,
         maxReferences: DEFAULT_MAX_REFERENCES,
+        imageAspect: '',
       }, s.comfy || {});
     }
 
@@ -839,14 +893,25 @@
       return r.json.name;
     }
 
-    /** Upload verified reference bytes and wire them into Qwen's temporary job graph. */
-    async stageReferenceImages(nodes, references, log = () => {}) {
-      const limit = referenceLimit(this.cfg);
+    /** Upload verified reference bytes and wire them into the temporary job graph; a text-only graph renders from the prompt alone. */
+    async stageReferenceImages(nodes, references, log = () => {}, jobLimit = 0, { edit = false, textOnly = false } = {}) {
+      const limit = Number(jobLimit) > 0 ? referenceLimit({ maxReferences: jobLimit }) : referenceLimit(this.cfg);
       const all = (Array.isArray(references) ? references : []);
       const requested = all.slice(0, limit);
       if (!requested.length) return null;
-      if (!qwenReferenceTarget(nodes)) {
-        throw new Error('this researched job has image references, but the selected workflow has no TextEncodeQwenImage21 (Qwen-Image 2.1) or ReferenceMultiLatent (FLUX.3 Klein) reference input');
+      if (textOnly || !qwenReferenceTarget(nodes)) {
+        if (edit) {
+          throw new Error('this is an image edit, but the selected workflow has no TextEncodeQwenImage21 (Qwen-Image 2.1) or ReferenceMultiLatent (FLUX.3 Klein) reference input — pick a workflow with a reference input for edits');
+        }
+        const why = textOnly ? 'you chose text only for this job' : 'the selected workflow is text-only (no reference input)';
+        log(`${textOnly ? 'Text only, as chosen' : 'This workflow is text-only (no reference input)'} — rendering from the prompt alone; ${all.length} reference image(s) not attached.`, 'warn');
+        return {
+          requested: requested.length, attached: [], failed: [], limit, textOnly: true,
+          skipped: all.map((ref, index) => ({
+            id: String((ref && ref.id) || `reference-${index + 1}`),
+            error: `not attached — ${why}`,
+          })),
+        };
       }
 
       const uploaded = [];
@@ -907,22 +972,105 @@
       return this._defs;
     }
 
+    /** Does the image workflow need the fallback for pictures, and can the fallback take them? */
+    async referencePlan(file = '') {
+      const cfg = this.cfg;
+      const image = String(file || cfg.imageWorkflow || '').trim();
+      const fb = referenceFallbackOf(cfg);
+      const takes = await this.workflowTakesReferences(image);
+      if (takes !== false) return { needed: false, image, takes };
+      const fallbackOk = !!(fb.workflow && fb.workflow !== image && await this.workflowTakesReferences(fb.workflow));
+      return {
+        needed: true, image, fallback: fb.workflow, fallbackOk, mode: fb.mode,
+        imageLabel: workflowLabel(image), fallbackLabel: workflowLabel(fb.workflow),
+      };
+    }
+
+    /** Where an edit renders: the image workflow if it can edit, else the Image Edit workflow, else the fallback. */
+    async editRoute(file = '') {
+      const cfg = this.cfg;
+      const image = String(file || cfg.imageWorkflow || '').trim();
+      if (await this.workflowTakesReferences(image) !== false) return { file: image, from: 'image', image };
+      const tried = new Set([image]);
+      const options = [['edit', String(cfg.editWorkflow || '').trim()], ['fallback', referenceFallbackOf(cfg).workflow]];
+      for (const [from, f] of options) {
+        if (!f || tried.has(f)) continue;
+        tried.add(f);
+        if (await this.workflowTakesReferences(f)) return { file: f, from, image };
+      }
+      return {
+        file: null, image,
+        reason: `the image workflow "${image}" is text-only and no edit-capable workflow is set — pick a workflow that takes pictures as the reference fallback (Settings → Overseer) or in the Image Edit tab`,
+      };
+    }
+
+    /** true/false when the workflow file has/lacks a reference input; null when it cannot be read. */
+    async workflowTakesReferences(file) {
+      const f = String(file || '').trim();
+      if (!f) return null;
+      try {
+        return !!qwenReferenceTarget((await this.loadWorkflow(f)).nodes);
+      } catch {
+        try {
+          return rawTakesReferences(await window.ala.comfy.readWorkflow({ dir: this.cfg.workflowsDir, file: f }));
+        } catch { return null; }
+      }
+    }
+
     /** Does the running ComfyUI know this node type? */
     async hasNode(classType) {
       try { const d = await this.nodeDefs(); return !!(d && d[classType]); } catch { return false; }
     }
 
     /** Generate images from a prompt through the configured image workflow. */
-    async generate(promptText, { count = 0, references = [], shouldStop = null, referenceLimit: jobRefLimit = 0, matchSource = false, aspect = '', workflow = '', variants = null } = {}, log = () => {}) {
+    async generate(promptText, { count = 0, references = [], shouldStop = null, referenceLimit: jobRefLimit = 0, matchSource = false, aspect = '', workflow = '', variants = null, referenceRoute = '' } = {}, log = () => {}) {
       const cfg = this.cfg;
       await this.ensureServer({ log });
-      const wfFile = String(workflow || '').trim() || cfg.imageWorkflow;
+      let wfFile = String(workflow || '').trim() || cfg.imageWorkflow;
 
       let wf;
       try {
         wf = await this.loadWorkflow(wfFile);
       } catch (e) {
         throw new Error('workflow: ' + e.message);
+      }
+      let usedFallback = '';
+      const textOnlyRoute = referenceRoute === 'textonly';
+      if (matchSource && Array.isArray(references) && references.length
+          && !String(workflow || '').trim() && !qwenReferenceTarget(wf.nodes)) {
+        const r = await this.editRoute(wfFile);
+        if (r && r.file && r.file !== wfFile) {
+          try {
+            const alt = await this.loadWorkflow(r.file);
+            if (qwenReferenceTarget(alt.nodes)) {
+              log(`“${wfFile}” is text-only — this edit renders on “${r.file}” (${r.from === 'edit' ? 'the Image Edit workflow' : 'the reference fallback'}) so it sees the picture.`);
+              wf = alt;
+              usedFallback = r.file;
+              wfFile = r.file;
+            }
+          } catch (e) {
+            log(`Could not load the edit workflow “${r.file}” (${e.message}).`, 'warn');
+          }
+        }
+      }
+      if (Array.isArray(references) && references.length && !matchSource && !textOnlyRoute
+          && !String(workflow || '').trim() && !qwenReferenceTarget(wf.nodes)) {
+        const fb = referenceFallbackOf(cfg);
+        if ((fb.mode === 'always' || fb.mode === 'ask') && fb.workflow && fb.workflow !== wfFile) {
+          try {
+            const alt = await this.loadWorkflow(fb.workflow);
+            if (qwenReferenceTarget(alt.nodes)) {
+              log(`“${wfFile}” is text-only — rendering this job on the reference fallback “${fb.workflow}” so it sees its reference picture(s).`);
+              wf = alt;
+              usedFallback = fb.workflow;
+              wfFile = fb.workflow;
+            } else {
+              log(`The reference fallback “${fb.workflow}” has no reference input either — rendering from the prompt alone.`, 'warn');
+            }
+          } catch (e) {
+            log(`Could not load the reference fallback “${fb.workflow}” (${e.message}) — rendering from the prompt alone.`, 'warn');
+          }
+        }
       }
       const slots = detectPromptSlots(wf);
       if (!slots || !slots.positive) {
@@ -933,14 +1081,20 @@
 
       const base = JSON.parse(JSON.stringify(wf.nodes));
       base[target.id].inputs[target.field] = String(promptText);
-      const referenceResult = await this.stageReferenceImages(base, references, log);
+      const referenceResult = await this.stageReferenceImages(base, references, log, jobRefLimit, { edit: !!matchSource, textOnly: textOnlyRoute && !matchSource });
       // Prompt writers name pictures the Qwen way (`<image1>`). FLUX.3 Klein expects
-      // `<ref_image_0>` for the first reference, so on a FLUX.3 graph the tokens are translated.
+      // `<ref_image_0>` for the first reference, so on a FLUX.3 graph the tokens are translated;
+      // on a text-only graph the markers and their lead-in words are dropped.
       const refNode = referenceResult && referenceResult.attached && referenceResult.attached.length
         ? qwenReferenceTarget(base) : null;
-      const mapRefTokens = refNode && refNode[1].classType === 'ReferenceMultiLatent'
-        ? (s) => String(s).replace(/<image(\d+)>/gi, (_, n) => `<ref_image_${Math.max(0, Number(n) - 1)}>`)
-        : (s) => s;
+      const mapRefTokens = referenceResult && referenceResult.textOnly
+        ? (s) => String(s)
+          .replace(/\s*\b(?:as shown in|as seen in|shown in|seen in|from|in|of|like|as)\s+<image\d+>/gi, '')
+          .replace(/\s*\(?<image\d+>\)?/gi, '')
+          .replace(/\s+([,.;:])/g, '$1')
+        : refNode && refNode[1].classType === 'ReferenceMultiLatent'
+          ? (s) => String(s).replace(/<image(\d+)>/gi, (_, n) => `<ref_image_${Math.max(0, Number(n) - 1)}>`)
+          : (s) => s;
       base[target.id].inputs[target.field] = mapRefTokens(base[target.id].inputs[target.field]);
       // An image edit keeps the source picture's size and framing (see matchEditSize).
       if (matchSource && referenceResult && referenceResult.attached && referenceResult.attached.length) {
@@ -954,11 +1108,13 @@
           log(`Could not match the edit to the source size (${m.reason}) — it renders at the workflow's own size${m.scaled ? ', resized to the source' : ''}.`, 'warn');
         }
       }
-      if (aspect && !(matchSource && referenceResult && referenceResult.attached && referenceResult.attached.length)) {
-        const label = ASPECTS.some(([l]) => l === aspect) ? aspect : null;
+      const jobAspect = String(aspect || '').trim();
+      const wantAspect = jobAspect || String(cfg.imageAspect || '').trim();
+      if (wantAspect && !(matchSource && referenceResult && referenceResult.attached && referenceResult.attached.length)) {
+        const label = ASPECTS.some(([l]) => l === wantAspect) ? wantAspect : null;
         const set = label ? setAspect(base, label) : 0;
-        if (set) log(`Canvas aspect: ${label}.`);
-        else log(`Could not set the canvas aspect to "${aspect}" — ${label ? 'this workflow has no ResolutionSelector' : 'unknown aspect'}; it renders at the workflow's own size.`, 'warn');
+        if (set) log(`Canvas aspect: ${label}${jobAspect ? '' : ' (your preferred image shape)'}.`);
+        else log(`Could not set the canvas aspect to "${wantAspect}" — ${label ? 'this workflow has no ResolutionSelector' : 'unknown aspect'}; it renders at the workflow's own size.`, 'warn');
       }
       if (slots.negative && typeof base[slots.negative].inputs.text !== 'string') {
         log('negative prompt slot is not plain text — leaving it alone', 'warn');
@@ -1000,7 +1156,7 @@
         }
       }
       log(`ComfyUI returned ${images.length} image(s).`);
-      return { images, referenceResult };
+      return { images, referenceResult, workflowUsed: wfFile, ...(usedFallback ? { referenceFallback: usedFallback } : {}) };
     }
 
     /** The output images of ONE finished job, fetched as bytes. */
@@ -1117,6 +1273,10 @@
       return rows.some((row) => Array.isArray(row) && String(row[1]) === String(promptId));
     }
 
+    async videoModel(workflow) {
+      try { return videoModelOf(await this.loadWorkflow(workflow || this.cfg.videoWorkflow)); } catch { return 'h3'; }
+    }
+
     /** Image → video through the configured i2v workflow. */
     async convertToVideo({ base64, mime = 'image/png', prompt, workflow, seconds, frames, aspect, size, nameHint = 'i2v', log = () => {} }) {
       const cfg = this.cfg;
@@ -1134,18 +1294,41 @@
       }
       const target = resolvePromptTarget(wf, slots);
       if (!target) throw new Error('the video workflow has no text prompt input');
+      const model = videoModelOf(wf);
+      const textOnly = !base64;
+      if (textOnly && model !== 'ltx') throw new Error('this video workflow needs a picture — text-only video works with the fallback video model (Settings → Generation)');
       const imgNode = detectI2vInput(wf);
-      if (!imgNode) throw new Error('no LoadImage node found — this is not an image-to-video workflow');
+      if (!imgNode && !textOnly) throw new Error('no LoadImage node found — this is not an image-to-video workflow');
 
-      const ext = (mime || '').includes('jpeg') ? 'jpg' : 'png';
-      const fname = await this.uploadImage({ base64, ext, nameHint });
-      log(`Input image uploaded as ${fname}.`);
+      let fname = null;
+      if (!textOnly) {
+        const ext = (mime || '').includes('jpeg') ? 'jpg' : 'png';
+        fname = await this.uploadImage({ base64, ext, nameHint });
+        log(`Input image uploaded as ${fname}.`);
+      }
 
       const graph = JSON.parse(JSON.stringify(wf.nodes));
       if (typeof prompt === 'string' && prompt.trim()) {
         graph[target.id].inputs[target.field] = prompt.trim();
       }
-      graph[imgNode].inputs.image = fname;
+      if (textOnly) {
+        if (imgNode) {
+          delete graph[imgNode];
+          for (const n of Object.values(graph)) {
+            for (const [k, v] of Object.entries(n.inputs || {})) if (isWire(v) && String(v[0]) === String(imgNode)) delete n.inputs[k];
+          }
+        }
+        log('Text-only video (no picture).');
+      } else {
+        graph[imgNode].inputs.image = fname;
+      }
+      if (model === 'ltx') {
+        for (const n of Object.values(graph)) if (LTX_VIDEO_RE.test(n.classType) && 'mode' in n.inputs) n.inputs.mode = textOnly ? 't2v' : 'i2v';
+        if (!aspect && !textOnly) {
+          const sz = size || sniffSize(base64, mime);
+          if (sz && sz.w && sz.h) { aspect = 'auto'; size = sz; }
+        }
+      }
       if (Array.isArray(frames) && frames.length) {
         const up = [];
         for (let i = 0; i < frames.length; i++) {
@@ -1173,9 +1356,15 @@
       }
       const seed = detectSeedSlot(wf);
       if (seed) graph[seed.id].inputs[seed.field] = randSeed();
+      let ltxSeed = null;
+      if (model === 'ltx') {
+        for (const n of Object.values(graph)) {
+          if (/^LTXV2\d*KSampler$/.test(n.classType) && 'seed' in n.inputs) { n.inputs.seed = randSeed(); if (ltxSeed == null) ltxSeed = n.inputs.seed; }
+        }
+      }
 
       const clientId = `ala-i2v-${Date.now()}-${randSeed().toString(16)}`;
-      log(`Submitting i2v job — workflow ${workflow || cfg.videoWorkflow}, seed ${seed ? graph[seed.id].inputs[seed.field] : '(n/a)'}`);
+      log(`Submitting ${textOnly ? 't2v' : 'i2v'} job — workflow ${workflow || cfg.videoWorkflow}, seed ${seed ? graph[seed.id].inputs[seed.field] : ltxSeed != null ? ltxSeed : '(n/a)'}`);
       const sub = await this.submit(graph, clientId);
       if (!sub.ok) throw new Error(sub.error || 'ComfyUI rejected the video workflow');
 
@@ -1221,7 +1410,8 @@
   }
 
   /** Write a video prompt for one image. mode: 'auto' | 'hybrid'. */
-  async function writeVideoPrompt({ base64, mime, userText = '', mode = 'auto', seconds = null }) {
+  async function writeVideoPrompt({ base64, mime, userText = '', mode = 'auto', seconds = null, model = 'h3' }) {
+    if (model === 'ltx') return writeLtxPrompt({ base64, mime, userText, mode, seconds });
     userText = String(userText || '').trim();
     if (mode === 'hybrid' && !userText) throw new Error('enter your extra instructions for Hybrid mode, or choose Auto');
     if (mode === 'hybrid' && userText.length > 2000) throw new Error('Hybrid instructions must fit within 2000 characters');
@@ -1267,6 +1457,52 @@ Rules:
     }
     return { prompt: text.slice(0, MAX_VIDEO_PROMPT), described: String(describe.text || '').slice(0, 1500) };
   }
+  /** Video prompt in the fallback video model's [VISUAL]/[SPEECH]/[SOUNDS] format; works without a picture. */
+  async function writeLtxPrompt({ base64, mime, userText = '', mode = 'auto', seconds = null }) {
+    userText = String(userText || '').trim();
+    if (!base64 && !userText) throw new Error('describe the video you want — a text-only video is made from your words alone');
+    if (mode === 'hybrid' && !userText) throw new Error('enter your extra instructions for Hybrid mode, or choose Auto');
+    if (userText.length > 2000) throw new Error('your instructions must fit within 2000 characters');
+    if (!base64) mode = 'hybrid';
+    let described = '';
+    if (base64) {
+      const d = await U.llmVision(
+        base64, mime,
+        'Describe this image in a few concrete sentences: the visual style (e.g. 2D anime illustration, 3D CG, photo), '
+        + 'the subject(s) and their appearance and clothing, pose and expression, the framing (wide/medium/close-up, '
+        + 'camera angle), the setting, the lighting and the palette. Plain description only — no video terms.',
+        { role: 'vision' }, 'Describing the image for the video prompt');
+      described = String(d.text || '').trim();
+    }
+    const len = Number(seconds) > 0 ? `${Number(seconds)}-second` : 'short';
+    const rules = `You write prompts for LTX 2.5, a video model that generates video WITH sound ${base64 ? 'starting from a picture' : 'from text alone (there is no picture)'}. It is distilled: there is NO negative prompt, and every word you write is read as something to show or hear. Write exactly three labelled lines, in this order:
+[VISUAL]: <visual style>, <shot size>. ${base64 ? 'Start from the picture (same characters, clothing, colours, setting), then' : 'Introduce every character with their full look (hair, face, eyes, clothing, build) and the setting, then'} describe the action as it develops over the ${len} clip, in order, with concrete physical motion. Name the camera movement in a sentence. Use cuts ("Cut to a close-up of …") only when the artist asks for them or the action clearly needs them. End the line with: Unscored footage.
+[SPEECH]: the exact spoken words in double quotes, each introduced by who says it and how (e.g. The old sailor, warm and slow: "…"). Default to English. Write none when nobody should speak.
+[SOUNDS]: 1-3 sentences of ambient, action and voice-quality sounds. End the line with: Unscored
+
+Rules:
+- NEVER write negations such as "no zoom", "no voice", "no music", "no text", "without". Say what IS there instead.
+- Spoken words appear ONLY if the artist asked for speech.
+- Visible text on screen only if asked, in double quotes.
+- Keep the artist's requested action, camera and audio choices exactly; add concrete detail, never replace them.`;
+    const sys = mode === 'hybrid'
+      ? `${rules}\n\nThe artist's words below are the required direction — every instruction in them must appear in the prompt, rephrased positively where needed.${described ? `\n\nIMAGE DESCRIPTION:\n${described}` : ''}\n\nARTIST'S WORDS:\n${userText}`
+      : `${rules}\n\nBring the picture to life with plausible motion and atmosphere — no new characters, no scene change, no dialogue.\n\nIMAGE DESCRIPTION:\n${described}`;
+    const r = await U.llmChat(
+      [{ role: 'user', content: sys + '\n\nRespond with ONLY the final prompt text, nothing else.' }],
+      { temperature: 0.7, maxTokens: 1200, role: 'ideation' }, 'Writing the video prompt');
+    let text = String(r.text || '').trim();
+    const j = extractJson(text);
+    if (j && typeof (j.prompt || j.text) === 'string') text = (j.prompt || j.text).trim();
+    text = text.replace(/^(final\s+prompt|prompt)\s*[:\-]\s*/i, '').trim();
+    if (!text) throw new Error('the model returned an empty prompt');
+    if (!/^\[VISUAL\]:/i.test(text)) text = `[VISUAL]: ${text.replace(/^\[?VISUAL\]?\s*:?\s*/i, '')}`;
+    if (mode === 'hybrid' && userText && !text.includes(userText) && !NEGATION_RE.test(userText)) {
+      text = text.replace(/^\[VISUAL\]:\s*/i, `[VISUAL]: ${userText} `);
+    }
+    return { prompt: text.slice(0, MAX_VIDEO_PROMPT), described: described.slice(0, 1500) };
+  }
+
   const MAX_VIDEO_PROMPT = 4000;
   const H3_FIRST_FRAME_LINE = 'For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.';
   const NEGATION_RE = /\b(no|not|don['’]?t|do not|never|without|avoid|stop)\b/i;
@@ -1326,9 +1562,11 @@ ${key}`;
   window.ComfyDriver = ComfyDriver;
   window.ComfyUI = {
     normalizeWorkflow, detectPromptSlots, detectSeedSlot, detectI2vInput, detectDurationSlot, extractJson, writeVideoPrompt,
+    videoModelOf, writeLtxPrompt,
     writeMergePrompt, addKeyframes, nearestAspect, setAspect, ASPECTS,
     expandSubgraphs, promptFieldOf, widgetInputs, resolvePromptTarget, qwenReferenceTarget,
     clearQwenReferences, injectQwenReferences, referenceLimit, MAX_REFERENCE_IMAGES, ComfyDriver,
     sniffSize, engineDown, matchEditSize, qwenEditCanvas, rmlEditCanvas, referenceSlotName,
+    referenceFallbackOf, routeJobsForReferences, workflowLabel, REFERENCE_FALLBACK_MODES,
   };
 })();

@@ -333,12 +333,16 @@ First verify that the picture plausibly depicts the requested subject. Search re
 
 If it matches, report only repeatable identity evidence. Separate the character from this particular artist's pose, background and rendering style. Do not identify or imitate an artist. Do not infer traits hidden by the crop.
 
+Set "humanLooking" to false when the character is NOT drawn as a normal human: a silhouette or shadow body, solid-colour or featureless skin, a robot or construct body, a screen, mask or faceless head, a monster. Animal ears, elf ears, horns, a tail or one cybernetic arm on an otherwise human body are still humanLooking true.
+
 Respond ONLY with JSON:
 {
   "matchesSubject": true,
   "why": "short reason for the match or rejection",
   "recognizedAs": "character name and franchise if visually supportable, otherwise the requested name",
   "species": "human/elf/etc. and signature non-human traits, or null",
+  "humanLooking": true,
+  "form": "ONLY when humanLooking is false: one sentence on the body's and face's actual form as drawn (e.g. 'brass robot body with riveted copper plates, a glass dome head whose only feature is one glowing lamp eye'), else null",
   "hair": "colour, length, cut, parting, tied sections, signature ornaments",
   "eyes": "colour and stable shape/details, or null",
   "face": "stable facial traits, brows, markings, ears, or null",
@@ -353,8 +357,11 @@ Respond ONLY with JSON:
       const r = await U.llmVision(base64, mime, prompt,
         { role: 'vision' }, `Reading ${wanted || 'a character'} reference`);
       const brief = U.extractJson(r.text);
+      const humanLooking = !(brief && (brief.humanLooking === false || /^\s*false\s*$/i.test(String(brief.humanLooking))));
       return {
         ...brief,
+        humanLooking,
+        form: humanLooking ? null : (brief.form || null),
         label,
         subject: wanted,
         source: 'web-character-vision',
@@ -492,6 +499,7 @@ Respond ONLY with a JSON array of strings: ["prompt1", "prompt2", ...]`;
     async fromResearch({
       query, kind = 'concept', sources = [], briefs = [], count = 6,
       mode = 'recreate', theme = '', extra = '', avoid = [], guidance = '', audience = '',
+      nonHuman = false,
     }) {
       const subject = String(query || '').trim();
       if (!subject) throw new Error('no research subject given');
@@ -514,7 +522,9 @@ Respond ONLY with a JSON array of strings: ["prompt1", "prompt2", ...]`;
 
       const characterBlock = (b, i) => {
         const rows = [
-          ['recognized as', b.recognizedAs], ['species', b.species], ['hair', b.hair],
+          ['recognized as', b.recognizedAs], ['species', b.species],
+          ...(b.humanLooking === false ? [['FORM (not a normal human)', b.form || 'not drawn as a normal human']] : []),
+          ['hair', b.hair],
           ['eyes', b.eyes], ['face', b.face], ['body', b.bodyDetail],
           ['wardrobe', b.wardrobe], ['accessories', b.accessories],
           ['distinguishing features', Array.isArray(b.distinguishingFeatures) ? b.distinguishingFeatures.join('; ') : b.distinguishingFeatures],
@@ -543,7 +553,7 @@ ${researchKind === 'character' ? `CHARACTER CONSISTENCY RULES:
 - Resolve a single identity from the recurring evidence. A one-off fan-art variation never outranks traits repeated across references or a canonical source.
 - Every prompt must repeat the character's name, franchise if known, hair, eyes, signature face/species traits, outfit/accessories, and distinguishing markers. Never write "same character" or rely on a previous prompt.
 - Include visual descriptors even if the model may know the character tag; the name alone is not a reconstruction.
-- Keep the artist's own rendering voice below. Do not inherit the style, watermark, background, pose, or camera of a random online image.\n` : `CONCEPT RESEARCH RULES:
+- Keep the artist's own rendering voice below. Do not inherit the style, watermark, background, pose, or camera of a random online image.\n${nonHuman ? `- THE CHARACTER IS NOT A NORMAL HUMAN. Keep the FORM the evidence describes in every prompt — body surface, head and face exactly as drawn. Never give them human skin tones, blush, cheeks, lips, pupils or a human face, and never describe them as an ordinary person; use their name and their form.\n` : ''}` : `CONCEPT RESEARCH RULES:
 - Turn the evidence into visible motifs: silhouette, materials, palette, wardrobe, architecture/props, lighting and camera opportunities.
 - A source can inspire an ingredient, never a traced composition. Do not name or imitate source artists.\n`}
 ${audience ? `\n${audience}\n` : ''}${guidance ? `\n${guidance}\n` : ''}${house ? `\n${house}\n` : ''}${dodge.length ? `\nAlready generated recently — every new prompt must be clearly different from all of these:\n${dodge.slice(0, 25).map((x) => `- ${String(x).slice(0, 140)}`).join('\n')}\n` : ''}

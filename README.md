@@ -68,7 +68,9 @@ falls back to the next one on its own.
 **Creating**
 - 🧠 **Prompt Lab**: write new prompts from an example prompt, from a reference picture, from web research or from a short story
 - 🖼️ **Two image engines**: Perchance (free, in-app browser, no GPU needed) or ComfyUI (local, any workflow you like, including video)
+- 📐 **Image shape**: choose the shape of new ComfyUI pictures (square, 2:3 portrait, 16:9 and more); the workflow keeps its own pixel count
 - 🎬 **Image to video**: turn an approved picture into a short clip, which the app then checks itself (length, sound, speech, what's on screen)
+- 🎥 **A second video model**: an optional *fallback video model* (an LTX graph) for slower, more consistent clips, and for clips made from words alone, with no picture
 - 🎞️ **Video Merge**: one clip that runs through two or more pictures, reaching each one at the second you choose
 - ✏️ **Edit with words**: *"make the sky orange"* edits an existing picture. Attach reference pictures for the change, or ask for *"the character from image2"* and the character is redrawn in the picture's own style
 - 📚 **Comics, webtoons and illustrated stories**: one premise, one button. The app plans the panels, draws a clean sheet per character and attaches it to every panel so the character stays the same person, keeps the best take of each panel, and writes the words to match what was actually drawn
@@ -201,6 +203,11 @@ whichever reference node the graph has.
 (MiniMax H3 distilled to 4 steps). **It needs a graphics card with 16-24 GB of VRAM** and a
 44 GB download, so the installer asks first and warns you.
 
+A second video workflow can be added by hand in Settings → Generation → *Fallback video model*
+(an LTX graph: slower, better consistency, and it can make a clip from text alone). When it is
+set, Convert to video gets a *Video model* menu and the Overseer can use it with `model: "ltx"`.
+The installer does not download it.
+
 Every download resumes if it is interrupted and is checked against the file's published
 SHA-256 before use, so running the installer again is always safe. At the end it saves
 the choices into the app's settings, so the first start already uses them. Run it again at any
@@ -249,6 +256,12 @@ matter if you want to publish.
 | **Settings** | One section at a time, with a search box that finds any setting. 9 colour themes |
 
 **Sidebar order:** hold any tab for a second and drag it where you want it; the other tabs slide out of the way. Settings → Library & app → *Sidebar order* resets it. Right-click the Overseer tab → *Mark as read* clears its badge.
+
+**Overseer engines:** a bar above the chat box shows the **Model** the Overseer runs on, its **Thinking** level, the **Vision** model that checks every picture, and a **Context** meter (the provider's own token count against the model's window, read from the server or typed in by clicking it). Click a chip to switch provider, model or thinking. The Overseer can do the same when you ask (`set_model`), and it can switch the ComfyUI workflow that renders, edits or animates (`set_workflow`, *"use FLUX"*).
+
+**Reference pictures on a text-only model:** some image workflows only read text (MOSS-Image, for example). Jobs that carry reference pictures then render from the prompt alone by default, or on a *fallback workflow* that takes pictures when you say to use the picture as the input (Settings → Overseer; *Ask me* and *Always* are options too). Edits always need their picture: they render on the image workflow when it can edit, otherwise on the Image Edit workflow or the fallback. Tell the Overseer *"use the i1 reference"* and it works from that research picture only; a character that is not drawn as a human (a robot, a silhouette, a mask) keeps that form in every prompt.
+
+**Make it yours:** Settings → Overseer → *Make it yours* holds your own instructions for the Overseer (personality, tone, standing rules). They are added to every turn; the upload gate still applies.
 
 **Fixing broken pictures:** 🩹 Fix on a card repairs fingers, mushed detail, proportions, the face, or whatever QC found. When a vision model is available it first describes the *corrected* picture, which works much better than a list of defects. Local damage is repaired with an edit that keeps the look; a broken body gets a fresh render on new seeds with the same character, outfit and scene in a simpler pose. With *Auto-fix failed pictures* on (Settings → Generation), a picture that fails QC is repaired automatically, up to two tries. The Overseer can do the same on request ("fix the last batch").
 
@@ -349,7 +362,8 @@ AcreArtStudio-Showcase/
 ├── workflows/                   ComfyUI graphs (Qwen-Image 2.1 Q8/Q4 and FastH3 video from the installer, optional FLUX.3 Klein)
 ├── tools/
 │   ├── setup.mjs                model installer: VRAM detection, menus, verified downloads
-│   └── test.mjs                 offline unit tests (no Electron, no network)
+│   ├── test.mjs                 offline unit tests (no Electron, no network)
+│   └── *_test.mjs               offline suites for single features (Overseer tools, references, video)
 └── src/
     ├── assets/                  app icon
     ├── main/                    Electron main process (privileged)
@@ -389,7 +403,9 @@ answers, the quality tail added to every prompt, prompt detection, title similar
 and text wrapping, the parser for the AI's batch picks, the Video Merge timeline, which image
 model made a picture, the character-remake prompt, tag clean-up for sentence prompts, reference
 pictures on FLUX.3 Image Klein graphs, the Image Edit workflow menu and library pictures as
-Overseer references.
+Overseer references. The feature suites next to it cover the image shape setting, text-only
+workflows and the reference fallback, edit routing, named references, the Overseer engine bar
+with `set_model`, and the fallback video model.
 
 Every JavaScript file also passes `node --check`.
 

@@ -68,6 +68,8 @@ contextBridge.exposeInMainWorld('ala', {
     vision: (base64, mime, prompt, opts) => invoke('llm:vision', { base64, mime, prompt, opts }),
     testProvider: (payload) => invoke('llm:testProvider', payload),
     route: (role) => invoke('llm:route', { role }),
+    modelInfo: (role) => invoke('llm:modelInfo', { role }),
+    catalog: (providerId) => invoke('llm:catalog', { providerId }),
     routes: () => invoke('llm:routes'),
     resetCircuit: (providerId, role) => invoke('llm:resetCircuit', { providerId, role }),
     probeCommand: (command) => invoke('llm:probeCommand', { command }),

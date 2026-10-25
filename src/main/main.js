@@ -444,6 +444,8 @@ function registerIpc() {
     llm.vision(store.settings.data, base64, mime, prompt, opts));
   h('llm:testProvider', (_e, payload) => llm.testProvider(store.settings.data, payload));
   h('llm:route', (_e, { role }) => llm.describeRoute(store.settings.data, role || 'vision'));
+  h('llm:modelInfo', (_e, payload) => llm.modelInfo(store.settings.data, (payload && payload.role) || 'overseer'));
+  h('llm:catalog', (_e, payload) => llm.modelCatalog(store.settings.data, (payload && payload.providerId) || 'local'));
   h('llm:routes', () => Object.fromEntries(
     llm.ROLES.map((r) => [r, llm.describeRoute(store.settings.data, r)])));
   h('llm:resetCircuit', (_e, payload) =>
