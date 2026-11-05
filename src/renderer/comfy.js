@@ -663,11 +663,39 @@
   const referenceModelName = (node) => (node && node.classType === 'ReferenceMultiLatent'
     ? 'FLUX.3 Klein' : 'Qwen-Image 2.1');
 
-  function clearQwenReferences(nodes, targetId) {
+  /**
+   * A workflow may run its first reference through a preparation chain (for example an
+   * upscale model, then a scale to a pixel budget) before the model sees it. Shape: slot 0 is
+   * wired to a node that is not a loader, and walking its wires upstream reaches exactly one
+   * LoadImage. Returns that loader's id, else null; a slot wired straight to a LoadImage (or
+   * empty) keeps the plain behaviour. The upload then goes into this loader, so the chain stays.
+   */
+  function referencePrepLoader(nodes, target, slot) {
+    const wire = target && target.inputs && target.inputs[slot];
+    if (!isWire(wire)) return null;
+    const first = nodes[wire[0]];
+    if (!first || /^(LoadImage|ImageUpload)$/i.test(first.classType || '')) return null;
+    const loaders = new Set();
+    const seen = new Set();
+    const stack = [wire[0]];
+    while (stack.length && seen.size < 64) {
+      const id = stack.pop();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const n = nodes[id];
+      if (!n) continue;
+      if (/^(LoadImage|ImageUpload)$/i.test(n.classType || '')) { loaders.add(id); continue; }
+      for (const v of Object.values(n.inputs || {})) if (isWire(v)) stack.push(v[0]);
+    }
+    return loaders.size === 1 ? [...loaders][0] : null;
+  }
+
+  function clearQwenReferences(nodes, targetId, keepSlots = []) {
     const target = nodes[targetId];
     const old = [];
     for (const [name, value] of Object.entries(target.inputs || {})) {
       if (!/^images\.image_?\d+$/i.test(name)) continue;
+      if (keepSlots.includes(name)) continue;
       if (isWire(value)) old.push(value[0]);
       delete target.inputs[name];
     }
@@ -684,7 +712,9 @@
     const found = qwenReferenceTarget(nodes);
     if (!found) return { ok: false, error: 'the selected image workflow has no TextEncodeQwenImage21 (Qwen-Image 2.1) or ReferenceMultiLatent (FLUX.3 Klein) reference input' };
     const [targetId, target] = found;
-    clearQwenReferences(nodes, targetId);
+    const slot0 = referenceSlotName(target, 0);
+    const prepLoader = referencePrepLoader(nodes, target, slot0);
+    clearQwenReferences(nodes, targetId, prepLoader ? [slot0] : []);
 
     if (!isWire(target.inputs.vae)) {
       const vae = Object.entries(nodes).find(([, n]) => n && n.classType === 'VAELoader');
@@ -698,6 +728,12 @@
     const capped = Math.max(1, Math.min(Math.floor(Number(limit)) || DEFAULT_MAX_REFERENCES, MAX_REFERENCE_IMAGES));
     const inserted = [];
     wanted.slice(0, capped).forEach((fname, index) => {
+      if (index === 0 && prepLoader) {
+        // The workflow prepares its first picture itself: feed its own loader, keep the chain.
+        nodes[prepLoader].inputs = Object.assign({}, nodes[prepLoader].inputs, { image: String(fname) });
+        inserted.push({ id: prepLoader, fname: String(fname), slot: slot0, prepared: true });
+        return;
+      }
       let id = `ala-ref-${index + 1}`;
       while (nodes[id]) id += '-x';
       nodes[id] = { classType: 'LoadImage', inputs: { image: String(fname) } };
@@ -706,7 +742,7 @@
       inserted.push({ id, fname: String(fname), slot });
     });
     const skipped = wanted.slice(capped);
-    return { ok: true, targetId, inserted, skipped, limit: capped };
+    return { ok: true, targetId, inserted, skipped, limit: capped, prepared: !!prepLoader };
   }
 
   // Python's round() is half-to-even; the server's sizes must be matched exactly.
@@ -763,27 +799,34 @@
    *      front of every save node and brings the result to the source's exact width × height.
    *      Skipped when the canvas already equals it.
    * `size` is the source's { w, h } (null/unknown → step 2 is skipped; the aspect still holds).
-   * Returns { ok, rewired: [samplerIds], canvas, scaled: bool, reason? }.
+   * `opts.keepRender` skips step 2 (the edit keeps its render size); `opts.prepared` means the
+   * first reference went through the workflow's own preparation chain, so its canvas is unknown.
+   * Returns { ok, rewired: [samplerIds], canvas, scaled: bool, keepRender, prepared, fromSource, reason? }.
    */
-  function matchEditSize(nodes, size) {
+  function matchEditSize(nodes, size, opts = {}) {
     const found = qwenReferenceTarget(nodes);
     if (!found) return { ok: false, rewired: [], scaled: false, reason: 'the workflow has no reference node (Qwen encoder / ReferenceMultiLatent)' };
     const [encId, enc] = found;
     const isRml = enc.classType === 'ReferenceMultiLatent';
     if (!isWire(enc.inputs[referenceSlotName(enc, 0)])) return { ok: false, rewired: [], scaled: false, reason: 'no picture on the reference node\'s first image slot' };
     const rewired = [];
+    // A masked edit starts from the reference picture's own latent, so its canvas already has the source's shape.
+    let fromSource = false;
     for (const [id, n] of Object.entries(nodes)) {
       if (!n || !SAMPLER_RE.test(n.classType || '') || !n.inputs || !isWire(n.inputs.latent_image)) continue;
       const from = nodes[n.inputs.latent_image[0]];
+      if (from && /^(SetLatentNoiseMask|VAEEncode\w*|InpaintModelConditioning)$/i.test(from.classType || '')) { fromSource = true; continue; }
       // Only a sampler that STARTS a picture; a hires/refine pass downstream keeps its input.
       if (!from || !/^Empty.*Latent|Switch/i.test(from.classType || '')) continue;
       n.inputs.latent_image = [encId, 2];
       rewired.push(id);
     }
-    const canvas = isRml ? rmlEditCanvas(size, enc.inputs) : qwenEditCanvas(size, enc.inputs.resolution ?? 1024);
+    const prepared = !!(opts && opts.prepared);
+    const canvas = prepared ? null : isRml ? rmlEditCanvas(size, enc.inputs) : qwenEditCanvas(size, enc.inputs.resolution ?? 1024);
     const w = Math.round(Number(size && size.w)), h = Math.round(Number(size && size.h));
     let scaled = false;
-    if (w >= 16 && h >= 16 && w <= 16384 && h <= 16384 && !(canvas && canvas.width === w && canvas.height === h)) {
+    const keepRender = !!(opts && opts.keepRender);
+    if (!keepRender && w >= 16 && h >= 16 && w <= 16384 && h <= 16384 && !(canvas && canvas.width === w && canvas.height === h)) {
       const made = new Map();
       for (const n of Object.values(nodes)) {
         if (!n || !/^Save/i.test(n.classType || '') || !n.inputs || !isWire(n.inputs.images)) continue;
@@ -798,7 +841,8 @@
         scaled = true;
       }
     }
-    return { ok: rewired.length > 0, rewired, canvas, scaled, ...(rewired.length ? {} : { reason: 'no sampler starts from an empty latent' }) };
+    const ok = rewired.length > 0 || fromSource;
+    return { ok, rewired, canvas, scaled, keepRender, prepared, fromSource, ...(ok ? {} : { reason: 'no sampler starts from an empty latent' }) };
   }
 
   class ComfyDriver {
@@ -943,8 +987,9 @@
       }));
       log(`Attached ${uploaded.length}/${requested.length} researched reference image(s) to ${referenceModelName(nodes[wired.targetId])}.`
         + (failed.length ? ` ${failed.length} could not be uploaded.` : '')
-        + (skipped.length ? ` ${skipped.length} left out by the ${limit}-reference ceiling.` : ''));
-      return { requested: requested.length, attached: uploaded.map((r) => r.id), failed, skipped, limit };
+        + (skipped.length ? ` ${skipped.length} left out by the ${limit}-reference ceiling.` : '')
+        + (wired.prepared ? ' The first one goes through the workflow\'s own preparation chain (e.g. upscale) before the model.' : ''));
+      return { requested: requested.length, attached: uploaded.map((r) => r.id), failed, skipped, limit, prepared: !!wired.prepared };
     }
 
     /** Load + normalize a workflow file from the configured directory (fresh every job). */
@@ -1100,10 +1145,13 @@
       if (matchSource && referenceResult && referenceResult.attached && referenceResult.attached.length) {
         const first = (Array.isArray(references) ? references : [])[0] || {};
         const src = sniffSize(first.base64, String(first.mime || '').toLowerCase());
-        const m = matchEditSize(base, src.w > 0 && src.h > 0 ? src : null);
+        const m = matchEditSize(base, src.w > 0 && src.h > 0 ? src : null,
+          { keepRender: !!cfg.editKeepRenderSize, prepared: !!referenceResult.prepared });
         if (m.ok) {
-          log(`Edit keeps the source size: ${src.w ? `${src.w}×${src.h}` : 'unknown size'}`
-            + (m.canvas ? ` (rendered on a ${m.canvas.width}×${m.canvas.height} canvas from <image1>${m.scaled ? ', then resized to match' : ''})` : '') + '.');
+          log(m.keepRender
+            ? `Edit keeps its render size (Settings → Generation → keep edits at render size)${src.w ? ` — source was ${src.w}×${src.h}` : ''}${m.canvas ? `, canvas ${m.canvas.width}×${m.canvas.height}` : ''}.`
+            : `Edit keeps the source size: ${src.w ? `${src.w}×${src.h}` : 'unknown size'}`
+            + (m.canvas ? ` (rendered on a ${m.canvas.width}×${m.canvas.height} canvas from <image1>${m.scaled ? ', then resized to match' : ''})` : m.scaled ? ' (resized to match after rendering)' : '') + '.');
         } else {
           log(`Could not match the edit to the source size (${m.reason}) — it renders at the workflow's own size${m.scaled ? ', resized to the source' : ''}.`, 'warn');
         }
@@ -1565,7 +1613,7 @@ ${key}`;
     videoModelOf, writeLtxPrompt,
     writeMergePrompt, addKeyframes, nearestAspect, setAspect, ASPECTS,
     expandSubgraphs, promptFieldOf, widgetInputs, resolvePromptTarget, qwenReferenceTarget,
-    clearQwenReferences, injectQwenReferences, referenceLimit, MAX_REFERENCE_IMAGES, ComfyDriver,
+    clearQwenReferences, injectQwenReferences, referencePrepLoader, referenceLimit, MAX_REFERENCE_IMAGES, ComfyDriver,
     sniffSize, engineDown, matchEditSize, qwenEditCanvas, rmlEditCanvas, referenceSlotName,
     referenceFallbackOf, routeJobsForReferences, workflowLabel, REFERENCE_FALLBACK_MODES,
   };

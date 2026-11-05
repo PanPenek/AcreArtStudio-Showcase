@@ -162,6 +162,7 @@ const DEFAULT_SETTINGS = {
     videoWorkflow: '',
     ltxWorkflow: '',
     editWorkflow: '',
+    editKeepRenderSize: false,
     referenceFallbackWorkflow: '',
     referenceFallbackMode: 'auto',
     imagesPerPrompt: 6,

@@ -1,7 +1,7 @@
 {
   "name": "acre-art-studio-showcase",
   "productName": "Acre Art Studio",
-  "version": "3.8.0",
+  "version": "3.8.1",
   "description": "Acre Art Studio: an AI art creation studio. Write prompts, generate images, AI quality check, review, publish.",
   "main": "src/main/main.js",
   "author": "PanPenek",

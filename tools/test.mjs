@@ -24,6 +24,7 @@
  *   - comfy.js        : FLUX.3 Image Klein graphs take reference pictures (workflows/ + a node-schema fixture)
  *   - imageedit.js    : the Image Edit tab's workflow picker
  *   - overseer.js     : queue_art takes library cards (or a batch's best pictures) as references
+ *   - comfy.js        : a workflow's own preparation chain for the first reference; keep-render-size edits
  */
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -186,6 +187,114 @@ console.log('comfy.js (edit size)');
     const scale = nodes[nodes.save.inputs.images[0]];
     assert.equal(scale.classType, 'ImageScale');
     assert.equal(`${scale.inputs.width}x${scale.inputs.height}`, '512x768');
+  });
+}
+
+console.log('comfy.js (reference preparation chain, keep render size)');
+{
+  const C = load('state.js', 'comfy.js').ComfyUI;
+  const J = JSON.stringify;
+  const graph = (slot0) => {
+    const g = {
+      7: { classType: 'VAELoader', inputs: { vae_name: 'vae.safetensors' } },
+      8: { classType: 'CLIPTextEncode', inputs: { text: 'a lighthouse on a cliff', clip: ['6', 0] } },
+      9: { classType: 'ReferenceMultiLatent', inputs: { positive: ['8', 0], vae: ['7', 0], resolution: 'keep resolution' } },
+      13: { classType: 'EmptySD3LatentImage', inputs: { width: 832, height: 1248, batch_size: 1 } },
+      14: { classType: 'KSampler', inputs: { latent_image: ['13', 0], positive: ['9', 0] } },
+      15: { classType: 'VAEDecode', inputs: { samples: ['14', 0], vae: ['7', 0] } },
+      16: { classType: 'SaveImage', inputs: { images: ['15', 0], filename_prefix: 'x' } },
+    };
+    if (slot0 === 'chain') {
+      Object.assign(g, {
+        22: { classType: 'LoadImage', inputs: { image: 'source.png' } },
+        23: { classType: 'UpscaleModelLoader', inputs: { model_name: 'upscaler_x4.pth' } },
+        24: { classType: 'ImageUpscaleWithModel', inputs: { upscale_model: ['23', 0], image: ['22', 0] } },
+        25: { classType: 'ImageScaleToTotalPixels', inputs: { image: ['24', 0], upscale_method: 'lanczos', megapixels: 1.4 } },
+      });
+      g[9].inputs['images.image0'] = ['25', 0];
+    } else if (slot0 === 'direct') {
+      g[30] = { classType: 'LoadImage', inputs: { image: 'old.png' } };
+      g[9].inputs['images.image0'] = ['30', 0];
+    } else if (slot0 === 'twoLoaders') {
+      Object.assign(g, {
+        40: { classType: 'LoadImage', inputs: { image: 'a.png' } },
+        41: { classType: 'LoadImage', inputs: { image: 'b.png' } },
+        42: { classType: 'ImageStitch', inputs: { image1: ['40', 0], image2: ['41', 0] } },
+      });
+      g[9].inputs['images.image0'] = ['42', 0];
+    }
+    return g;
+  };
+  test('a preparation chain on the first slot is kept and fed through its own loader', () => {
+    const g = graph('chain');
+    assert.equal(C.referencePrepLoader(g, g[9], 'images.image0'), '22');
+    const r = C.injectQwenReferences(g, ['up-1.png'], 1);
+    assert.ok(r.ok && r.prepared === true, J(r));
+    assert.equal(J(g[9].inputs['images.image0']), J(['25', 0]));
+    assert.equal(g[22].inputs.image, 'up-1.png');
+    assert.ok(!g['ala-ref-1'] && g[23] && g[24] && g[25]);
+    assert.ok(r.inserted.length === 1 && r.inserted[0].id === '22' && r.inserted[0].prepared === true, J(r.inserted));
+  });
+  test('a second reference still gets its own loader on the next slot', () => {
+    const g = graph('chain');
+    const r = C.injectQwenReferences(g, ['up-1.png', 'up-2.png'], 2);
+    assert.equal(g[22].inputs.image, 'up-1.png');
+    assert.ok(g['ala-ref-2'] && g['ala-ref-2'].inputs.image === 'up-2.png', J(g));
+    assert.equal(J(g[9].inputs['images.image1']), J(['ala-ref-2', 0]));
+    assert.equal(r.inserted.length, 2);
+  });
+  test('without a chain the references are wired as before', () => {
+    const g = graph('direct');
+    assert.equal(C.referencePrepLoader(g, g[9], 'images.image0'), null);
+    const r = C.injectQwenReferences(g, ['up-1.png'], 1);
+    assert.ok(r.ok && !r.prepared && !g[30] && g['ala-ref-1'], J(r));
+    assert.equal(J(g[9].inputs['images.image0']), J(['ala-ref-1', 0]));
+    const e = graph('none');
+    const r2 = C.injectQwenReferences(e, ['up-1.png'], 1);
+    assert.ok(r2.ok && !r2.prepared && e['ala-ref-1']);
+    const t2 = graph('twoLoaders');
+    assert.equal(C.referencePrepLoader(t2, t2[9], 'images.image0'), null, 'two loaders upstream is ambiguous');
+  });
+  test('the Qwen-Image 2.1 encoder slot keeps its chain too', () => {
+    const g = {
+      v: { classType: 'VAELoader', inputs: {} },
+      enc: { classType: 'TextEncodeQwenImage21', inputs: { vae: ['v', 0], prompt: 'x', resolution: 1024, 'images.image_1': ['50', 0] } },
+      50: { classType: 'ImageScaleToTotalPixels', inputs: { image: ['51', 0], megapixels: 1 } },
+      51: { classType: 'LoadImage', inputs: { image: 'p.png' } },
+    };
+    const r = C.injectQwenReferences(g, ['u.png'], 1);
+    assert.ok(r.prepared && g[51].inputs.image === 'u.png', J(g));
+    assert.equal(J(g.enc.inputs['images.image_1']), J(['50', 0]));
+  });
+  test('keepRender skips the resize to the source; a prepared reference has no canvas guess', () => {
+    const g = graph('chain');
+    C.injectQwenReferences(g, ['up-1.png'], 1);
+    const m = C.matchEditSize(g, { w: 680, h: 649 }, { prepared: true });
+    assert.ok(m.ok && J(g[14].inputs.latent_image) === J(['9', 2]), J(m));
+    assert.ok(m.canvas === null && m.prepared === true && m.scaled === true, J(m));
+    assert.equal(g['ala-match-size'].inputs.width, 680);
+    const k = graph('chain');
+    C.injectQwenReferences(k, ['up-1.png'], 1);
+    const mk = C.matchEditSize(k, { w: 680, h: 649 }, { keepRender: true, prepared: true });
+    assert.ok(mk.ok && mk.keepRender === true && mk.scaled === false && !k['ala-match-size'], J(mk));
+    assert.equal(J(k[16].inputs.images), J(['15', 0]));
+  });
+  test('a masked edit that starts from the source latent counts as size-matched', () => {
+    const g = graph('chain');
+    g[30] = { classType: 'VAEEncode', inputs: { pixels: ['25', 0], vae: ['7', 0] } };
+    g[31] = { classType: 'SetLatentNoiseMask', inputs: { samples: ['30', 0], mask: ['32', 0] } };
+    g[14].inputs.latent_image = ['31', 0];
+    C.injectQwenReferences(g, ['up-1.png'], 1);
+    const m = C.matchEditSize(g, { w: 680, h: 649 }, { keepRender: true, prepared: true });
+    assert.ok(m.ok && m.fromSource === true && m.rewired.length === 0 && !m.reason, J(m));
+    assert.equal(J(g[14].inputs.latent_image), J(['31', 0]));
+  });
+  test('the keep-render-size setting is wired from Settings to the driver', () => {
+    const read = (rel) => fs.readFileSync(new URL(rel, root), 'utf8');
+    assert.ok(/matchEditSize\(base,[^;]*keepRender: !!cfg\.editKeepRenderSize, prepared: !!referenceResult\.prepared/s.test(read('comfy.js')));
+    assert.ok(/editKeepRenderSize: false/.test(read('../main/store.js')));
+    const app = read('app.js');
+    assert.ok(/id="set-edit-keep-render"/.test(app) && /bindCheck\('#set-edit-keep-render', \(v\) => \(\{ comfy: \{ editKeepRenderSize: v \} \}\)\)/.test(app));
   });
 }
 
