@@ -69,11 +69,12 @@ falls back to the next one on its own.
 - 🧠 **Prompt Lab**: write new prompts from an example prompt, from a reference picture, from web research or from a short story
 - 🖼️ **Two image engines**: Perchance (free, in-app browser, no GPU needed) or ComfyUI (local, any workflow you like, including video)
 - 📐 **Image shape**: choose the shape of new ComfyUI pictures (square, 2:3 portrait, 16:9 and more); the workflow keeps its own pixel count
-- 🎬 **Image to video**: turn an approved picture into a short clip, which the app then checks itself (length, sound, speech, what's on screen)
+- 🎬 **Image to video**: turn an approved picture into a short clip, which the app then checks itself (length, sound, speech, what's on screen). Clips from the main video model are planned as 3-4 shots from different angles with the character moving the whole time, unless you ask for a static camera
 - 🎥 **A second video model**: an optional *fallback video model* (an LTX graph) for slower, more consistent clips, and for clips made from words alone, with no picture
 - 🎞️ **Video Merge**: one clip that runs through two or more pictures, reaching each one at the second you choose
 - ✏️ **Edit with words**: *"make the sky orange"* edits an existing picture. Attach reference pictures for the change, or ask for *"the character from image2"* and the character is redrawn in the picture's own style
-- 📚 **Comics, webtoons and illustrated stories**: one premise, one button. The app plans the panels, draws a clean sheet per character and attaches it to every panel so the character stays the same person, keeps the best take of each panel, and writes the words to match what was actually drawn
+- 📚 **Comics, webtoons and illustrated stories**: one premise, one button. The app plans the panels, draws a clean sheet per character and attaches it to every panel so the character stays the same person, keeps the best take of each panel, and writes the words to match what was actually drawn. Nine art styles and twelve page styles; pick the panel layout, drag the lines between panels to resize them, move and zoom each picture inside its frame, upscale the panels for a 1.5× or 2× page, and make *Part 2* of a finished comic with one button
+- 📖 **Series**: a named recurring story; each part is a comic page planned so it does not repeat the earlier ones, titled *"Name — Part N"*, filed in its own DeviantArt folder and linked to the parts before it
 - 🔁 **Continuations**: someone asked for "part 2"? It writes a sequel prompt that keeps the same character and outfit
 
 **Checking**
@@ -82,9 +83,10 @@ falls back to the next one on its own.
 - 🔤 **Title memory**: stops the AI from calling everything "Moonlit Serenity" by remembering every title it already used
 
 **Publishing and learning**
-- ☁️ Uploads to **DeviantArt** as private drafts (publishing is a separate, deliberate step)
+- ☁️ Uploads to **DeviantArt** as private drafts (publishing is a separate, deliberate step): the still picture, its animated GIF or, with DeviantArt Core, its MP4, into one or several folders
 - 📤 A **Patreon posting deck**: picture, title and text go to the clipboard in the order Patreon asks for them
 - 📊 **Statistics and a learning loop**: which themes, tags and posting hours actually perform, turned into guidance for the next round. Every picture records which image model made it, so what works on one model is not taught to another
+- 📈 **Channel growth**: daily watchers and profile views read from public profile pages, the pace towards a watcher goal, which kind of post (picture, comic page, GIF, MP4) gets the most views, and tags learned from your own best-viewed posts
 - 🧑‍🏫 **Teach it**: write your own rules ("always…", "never…") that the app follows and that no automatic rebuild can overwrite
 
 **Running on its own (optional)**
@@ -243,23 +245,23 @@ matter if you want to publish.
 | Tab | What you do there |
 |---|---|
 | **Dashboard** | Is everything working? One status row per job (writing, metadata, quality check, generation, upload), plus what's running right now |
-| **Overseer** | Chat with the assistant. It can research a subject, write and queue prompts, edit pictures, make and merge videos, make comics and report back. Every action it takes is shown, so you can check what it did, and with a reasoning model its thinking is one click away (💭 Thought) |
+| **Overseer** | Chat with the assistant. It can research a subject, write and queue prompts, edit pictures, make and merge videos, make comics (and change, stop or continue them) and report back. *+ New chat* keeps the current chat under *Chats ▾*, where earlier chats can be searched, reopened, renamed or deleted. Every action it takes is shown, so you can check what it did, and with a reasoning model its thinking is one click away (💭 Thought) |
 | **Prompt Lab** | Write prompts from examples, reference images or a story. Manage the generation queue |
 | **Review** | The main grid: every picture with its score, defects, prompt and metadata. Keyboard-driven. Every card has **✎ Edit** and **🩹 Fix** |
 | **Image Edit** | Edit one picture with Qwen-Image 2.1: brush an area and say what should change there, or describe a change to the whole picture. Every result is a numbered checkpoint in a history panel (undo, redo with a new seed, reuse an instruction, branch from an older one). Results keep the source picture's size. A *Workflow* menu picks the edit engine (for example FLUX.3 Image Klein) without changing the generator's. 📎 attaches up to three reference pictures; *"make her the character from image2"* has a vision model describe that character and redraws it in the source picture's style |
 | **Video Merge** | One clip through two or more pictures: set the second each picture is reached, let the model write how it changes (or write it yourself) and render it with the ComfyUI video workflow. The clip lands in Review as a new card |
 | **Drafts** | What has been uploaded, what is waiting, what failed and why |
-| **Statistics** | How published work performs, the learned playbook, and your own *Teach it* rules |
-| **Comics** | Comic pages, webtoon strips and illustrated stories from one premise and one button. Pick another take, reroll or edit a panel in words, and drag, resize or rewrite balloons on the live page. Six page styles |
+| **Statistics** | How published work performs, the learned playbook, your own *Teach it* rules, and *Channel growth* |
+| **Comics** | Comic pages, webtoon strips and illustrated stories from one premise and one button. Pick another take, reroll or edit a panel in words, and drag, resize or rewrite balloons on the live page. Layout, frame sizes and the picture inside each frame are adjustable on the page; *Series* sits on top of the tab |
 | **Continuations** | Turn "please make a part 2!" into a prompt that keeps the character |
 | **Perchance / Upscaler / DeviantArt / Patreon** | Built-in browser tabs for those sites. You sign in once and the app reuses the session |
 | **Settings** | One section at a time, with a search box that finds any setting. 9 colour themes |
 
 **Sidebar order:** hold any tab for a second and drag it where you want it; the other tabs slide out of the way. Settings → Library & app → *Sidebar order* resets it. Right-click the Overseer tab → *Mark as read* clears its badge.
 
-**Overseer engines:** a bar above the chat box shows the **Model** the Overseer runs on, its **Thinking** level, the **Vision** model that checks every picture, and a **Context** meter (the provider's own token count against the model's window, read from the server or typed in by clicking it). Click a chip to switch provider, model or thinking. The Overseer can do the same when you ask (`set_model`), and it can switch the ComfyUI workflow that renders, edits or animates (`set_workflow`, *"use FLUX"*).
+**Overseer engines:** a toolbar inside the chat box shows the **Model** the Overseer runs on, its **Thinking** level, the **Vision** model that checks every picture, and a **Context** meter (the provider's own token count against the model's window, read from the server or typed in by clicking it). Click a model to open a small picker: search every provider's model list, see each model's live price per million tokens (input, cache hit, output; *free · local* for local servers), and click one to switch. The header holds the chat bar and an ⓘ *Status* pop-over with the standing brief, schedule, publishing and today's tokens. The Overseer can do the same when you ask (`set_model`), and it can switch the ComfyUI workflow that renders, edits or animates (`set_workflow`, *"use FLUX"*).
 
-**Reference pictures on a text-only model:** some image workflows only read text (MOSS-Image, for example). Jobs that carry reference pictures then render from the prompt alone by default, or on a *fallback workflow* that takes pictures when you say to use the picture as the input (Settings → Overseer; *Ask me* and *Always* are options too). Edits always need their picture: they render on the image workflow when it can edit, otherwise on the Image Edit workflow or the fallback. Tell the Overseer *"use the i1 reference"* and it works from that research picture only; a character that is not drawn as a human (a robot, a silhouette, a mask) keeps that form in every prompt.
+**Reference pictures on a text-only model:** some image workflows only read text (MOSS-Image, for example). Jobs that carry reference pictures then render from the prompt alone by default, or on a *fallback workflow* that takes pictures when you say to use the picture as the input (Settings → Overseer; *Ask me* and *Always* are options too). Edits always need their picture: they render on the *Edit model* when one is picked (Settings → Generation), else on the image workflow when it can edit, otherwise on the Image Edit workflow or the fallback. Tell the Overseer *"use the i1 reference"* and it works from that research picture only; a character that is not drawn as a human (a robot, a silhouette, a mask) keeps that form in every prompt.
 
 **Make it yours:** Settings → Overseer → *Make it yours* holds your own instructions for the Overseer (personality, tone, standing rules). They are added to every turn; the upload gate still applies.
 
@@ -363,7 +365,7 @@ AcreArtStudio-Showcase/
 ├── tools/
 │   ├── setup.mjs                model installer: VRAM detection, menus, verified downloads
 │   ├── test.mjs                 offline unit tests (no Electron, no network)
-│   └── *_test.mjs               offline suites for single features (Overseer tools, references, video)
+│   └── *_test.mjs               offline suites for single features (Overseer tools, references, video, comics, growth)
 └── src/
     ├── assets/                  app icon
     ├── main/                    Electron main process (privileged)
@@ -374,7 +376,8 @@ AcreArtStudio-Showcase/
     │   ├── prompts.js           shared prompt templates
     │   ├── research.js          web research for the Overseer
     │   ├── videocheck.js        measure rendered videos
-    │   └── da*.js, patreon-media.js   publishing helpers
+    │   ├── channel.js           daily public profile counters (Channel growth)
+    │   └── da*.js, uploadmedia.js, patreon-media.js   publishing helpers
     └── renderer/                the UI (sandboxed)
         ├── index.html, styles.css, app.js
         ├── pipeline.js          the orchestrator
@@ -382,7 +385,8 @@ AcreArtStudio-Showcase/
         ├── overseer*.js         the assistant
         ├── promptlab.js, promptstyle.js, variety.js, titles.js
         ├── insights.js, teach.js, models.js, origins*.js   learning
-        ├── comics*.js, comiclayout.js, continuations*.js
+        ├── comics*.js, comiclayout.js, series*.js, continuations*.js
+        ├── growth*.js           tags, upload options and the Channel growth panel
         ├── videomerge*.js       the Video Merge tab
         ├── fonts/               comic lettering fonts (SIL Open Font License)
         └── triage*.js, health.js, providers.js, …
@@ -405,7 +409,9 @@ model made a picture, the character-remake prompt, tag clean-up for sentence pro
 pictures on FLUX.3 Image Klein graphs, the Image Edit workflow menu and library pictures as
 Overseer references. The feature suites next to it cover the image shape setting, text-only
 workflows and the reference fallback, edit routing, named references, the Overseer engine bar
-with `set_model`, and the fallback video model.
+with `set_model`, the fallback video model, Overseer chats, the one-comic-per-turn guard, comic frames and
+crop, changing and continuing comics, the picture count, bypassed workflow nodes, the Edit model, and
+Channel growth with Series.
 
 Every JavaScript file also passes `node --check`.
 

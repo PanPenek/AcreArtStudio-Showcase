@@ -2306,6 +2306,10 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
     /** Write ONE card's metadata from the FINISHED IMAGE — Review's "Enhance" button. */
     async enhanceCardMetadata(card) {
       if (!card) throw new Error('no card');
+      const comic = card.comicId && window.Comics && Comics.get ? Comics.get(card.comicId) : null;
+      if (comic) {
+        try { const m = await Comics.writeMetadata(comic, card); card.metaFromImage = false; card.metaFromComic = true; State.persistLibrary({ quiet: true }); return m; } catch (e) { State.addLog(`Comic metadata: ${e.message} — using the picture writer`, 'warn'); }
+      }
       const s = State.settings;
       const preferredTags = window.Insights ? window.Insights.preferredTags(8) : [];
       const titleHints = window.Insights && window.Insights.playbook
@@ -2467,6 +2471,11 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         throw new Error(`this card is set to publish on ${where} — tick DeviantArt in Review first`);
       }
 
+      const opts = window.Growth ? Growth.uploadOptions(card, State.settings) : null;
+      if (opts && opts.media && (State.settings.da.uploadMethod || 'session') === 'api') {
+        throw new Error('GIF and MP4 posts need the session upload route (Settings → DeviantArt → Upload method)');
+      }
+
       card.status = 'uploading';
       card.error = null;
       card.updatedAt = Date.now();
@@ -2486,7 +2495,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
             title: card.metadata.title,
             description,
             tags: card.metadata.tags,
-            isAiGenerated: s.metadata.isAiGenerated,
+            isAiGenerated: opts ? opts.isAiGenerated : s.metadata.isAiGenerated,
             noai: s.metadata.noai,
           })
           : await window.ala.daweb.upload({
@@ -2495,9 +2504,10 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
             description,
             tags: card.metadata.tags,
             isMature,
-            isAiGenerated: s.metadata.isAiGenerated,
+            isAiGenerated: opts ? opts.isAiGenerated : s.metadata.isAiGenerated,
             noai: s.metadata.noai,
-            galleryIds: s.da.galleryIds || [],
+            galleryIds: opts ? opts.galleryIds : (s.da.galleryIds || []),
+            media: opts ? opts.media : null,
             allowComments: s.da.allowComments !== false,
             allowFreeDownload: s.da.allowFreeDownload !== false,
             publish: s.da.autoPublish !== false,
@@ -2616,15 +2626,17 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
       if (!card.da || !card.da.itemid) throw new Error('no Sta.sh id on this card');
       const s = State.settings;
       const isMature = card.mature !== undefined ? !!card.mature : !!s.metadata.mature;
+      let o = null;
+      try { o = window.Growth ? Growth.uploadOptions({ ...card, daMedia: null }, s) : null; } catch { o = null; }
       const res = await window.ala.daweb.applyMetadata({
         privateId: card.da.itemid,
         title: card.metadata.title,
         description: withDescriptionFooter(card.metadata.description),
         tags: card.metadata.tags,
         isMature,
-        isAiGenerated: s.metadata.isAiGenerated,
+        isAiGenerated: o ? o.isAiGenerated : s.metadata.isAiGenerated,
         noai: s.metadata.noai,
-        galleryIds: s.da.galleryIds || [],
+        galleryIds: o ? o.galleryIds : (s.da.galleryIds || []),
         allowComments: s.da.allowComments !== false,
         allowFreeDownload: s.da.allowFreeDownload !== false,
       }).catch((e) => ({ ok: false, error: e.message, kind: 'transient' }));

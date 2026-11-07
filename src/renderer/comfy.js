@@ -290,6 +290,22 @@
   }
 
   /**
+   * Remove inputs wired to nodes that are not in the graph (e.g. a bypassed reference loader
+   * in a text-only job), so ComfyUI does not reject the prompt. Returns the dropped wires.
+   */
+  function dropMissingWires(nodes, dangling = []) {
+    for (const [nid, node] of Object.entries(nodes)) {
+      for (const [name, v] of Object.entries((node && node.inputs) || {})) {
+        if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && !nodes[v[0]]) {
+          delete node.inputs[name];
+          dangling.push(`${node.classType}#${nid}.${name}`);
+        }
+      }
+    }
+    return dangling;
+  }
+
+  /**
    * Normalize a ComfyUI workflow file into an internal shape: `{ nodes: { id: { classType, inputs,
    * widgets } }, links: { id: [fromId, fromSlot] } }` where every `inputs[name]` is either
    * `[nodeId, slot]` (a wire) or a…
@@ -304,7 +320,8 @@
       for (const [id, n] of Object.entries(raw)) {
         nodes[id] = { classType: n.class_type, inputs: Object.assign({}, n.inputs || {}) };
       }
-      return { nodes, links: {} };
+      const dangling = dropMissingWires(nodes);
+      return dangling.length ? { nodes, links: {}, dangling } : { nodes, links: {} };
     }
 
     if (!Array.isArray(raw.nodes)) throw new Error('not an API- or editor-format workflow');
@@ -376,6 +393,7 @@
         nodes[id] = { classType: n.type, inputs: Object.assign({}, wired) };
       }
     }
+    dropMissingWires(nodes, dangling);
     return { nodes, links: linkMap, needsDefs: !defs, dangling };
   }
 
@@ -1031,10 +1049,12 @@
       };
     }
 
-    /** Where an edit renders: the image workflow if it can edit, else the Image Edit workflow, else the fallback. */
+    /** Where an edit renders: the Edit model (Settings) when it takes pictures, else the image workflow if it can edit, else the Image Edit workflow, else the fallback. */
     async editRoute(file = '') {
       const cfg = this.cfg;
       const image = String(file || cfg.imageWorkflow || '').trim();
+      const pickedEdit = String(cfg.editWorkflow || '').trim();
+      if (!file && pickedEdit && await this.workflowTakesReferences(pickedEdit)) return { file: pickedEdit, from: 'edit', image };
       if (await this.workflowTakesReferences(image) !== false) return { file: image, from: 'image', image };
       const tried = new Set([image]);
       const options = [['edit', String(cfg.editWorkflow || '').trim()], ['fallback', referenceFallbackOf(cfg).workflow]];
@@ -1372,10 +1392,10 @@
       }
       if (model === 'ltx') {
         for (const n of Object.values(graph)) if (LTX_VIDEO_RE.test(n.classType) && 'mode' in n.inputs) n.inputs.mode = textOnly ? 't2v' : 'i2v';
-        if (!aspect && !textOnly) {
-          const sz = size || sniffSize(base64, mime);
-          if (sz && sz.w && sz.h) { aspect = 'auto'; size = sz; }
-        }
+      }
+      if (!aspect && !textOnly && base64) {
+        const sz = size || sniffSize(base64, mime);
+        if (sz && sz.w && sz.h) { aspect = 'auto'; size = sz; }
       }
       if (Array.isArray(frames) && frames.length) {
         const up = [];
@@ -1470,29 +1490,45 @@
       + 'camera angle), the setting, the lighting and the palette. Plain description only — no video terms.',
       { role: 'vision' }, 'Describing the image for the video prompt');
 
-    const len = Number(seconds) > 0 ? `${Number(seconds)}-second` : 'short';
+    const secsN = Number(seconds) > 0 ? Number(seconds) : 10;
+    const len = `${secsN}-second`;
+    const calm = mode === 'hybrid' && /\b(static|still camera|locked|one shot|single shot|one take|continuous|no cuts?|without cuts?|same shot)\b/i.test(userText);
+    const shots = calm || secsN < 6 ? 1 : secsN < 10 ? 2 : secsN < 13 ? 3 : 4;
+    const cutTimes = Array.from({ length: shots - 1 }, (_, i) => (secsN * (i + 1)) / shots);
+    const ts = (s) => `00:${String(Math.floor(s)).padStart(2, '0')}.${String(Math.round((s % 1) * 1000)).padStart(3, '0')}`;
+    const shotPlan = shots === 1
+      ? `Use ONE shot ([Shot 1] only). ${calm ? 'Keep the camera exactly as he asked.' : 'Make it lively anyway: continuous, clearly visible body motion for the whole clip and one camera move with amplitude and speed (e.g. "The camera pushes in with large amplitude at slow speed").'}`
+      : `Use exactly ${shots} shots. [Shot 1] has no timestamp and opens on Picture 1 exactly. Start the later shots at ${cutTimes.map((t, i) => `[Shot ${i + 2}] "At ${ts(t)}, the camera cuts to …" (or "the shot transitions with a cross-dissolve to …")`).join(', ')}.
+Every shot shows the SAME character in the SAME place and outfit, from a NEW angle or shot size, and must add something new. A good ${shots}-shot order: full body from the front → ${shots >= 3 ? 'a three-quarter or side angle as the character turns → ' : ''}a close-up on the face, the hands or the detail the clip is about${shots >= 4 ? ' → a full-body or medium shot for the final pose, facing the camera' : ', ending on the face and final pose'}.
+In EVERY shot the character is moving the whole time — never standing still: walking, turning, gesturing, looking around, leaning toward the camera, handling what they hold, reacting with a clear expression (surprise, joy, determination). Give each shot its own camera move with amplitude and speed ("The camera pushes in with large amplitude at fast speed", "arc shot at slow speed", "tilts up from the feet to the face").`;
     const rules = `You write prompts for MiniMax H3, an image-to-video model that generates video WITH sound. It is CFG-distilled: there is NO negative prompt, and every word you write is read as something to show or hear. Follow this format exactly:
 
 Line 1, verbatim: For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.
 Then one blank line, then three fields:
-integrated_multimodal_description: [Shot 1] <visual style taken from the image>, <shot size>. Anchor the first frame (same character, clothing, colours, composition, setting as the picture), then the action onset, its continuous development over the ${len} clip, and the result. Exactly one camera move, written as a sentence: "The camera holds a static shot" when the camera must not move, or e.g. "The camera pushes in with small amplitude at slow speed". Use a single shot unless cuts are explicitly asked for.
+integrated_multimodal_description: [Shot 1] <visual style taken from the image>, <shot size>. Anchor the first frame (same character, clothing, colours, composition, setting as the picture), then what happens across the ${len} clip — every action described as a visible, physical event with a start and a result.
 overall_soundscape: 1-3 sentences of ambient, action and non-verbal human sounds (footsteps, wind, birdsong, rustling leaves). Write N/A only if total silence is asked for.
 non_diegetic_music: instruments and tempo, or N/A.
+
+SHOTS AND MOTION
+${shotPlan}
+- If the picture or his words describe something that is changing or growing, the change keeps PROGRESSING across the clip, visibly further along from shot to shot, and the character reacts to it with hands and face.
+- Write everything as a continuous story in present tense; ${shots > 1 ? 'about 45-80 words per shot' : '90-160 words'}.
 
 Rules:
 - NEVER write negations such as "no zoom", "no voice", "no music", "no text", "without dialogue". Say what IS there instead: a static shot, N/A music, a soundscape with only ambient sound.
 - Spoken words appear ONLY if the artist asked for speech. Then give the speaker an ID and a voice, and wrap the exact words with a language tag: The young knight with a bright, cheerful voice (S1) says: <d>[English] exact words</d>. Default the language to English unless another one is asked for. If nobody should speak, write no dialogue and describe only non-verbal sounds.
 - Put visible text on screen only if asked, in double quotes.
+- No new characters and no new location; the same person in every shot.
 - Keep the artist's requested action, camera and audio choices exactly; add concrete detail, never replace them.`;
     const sys = mode === 'hybrid'
       ? `${rules}\n\nThe artist's words below are the required direction — every instruction in them must appear in the prompt, rephrased positively where needed.\n\nIMAGE DESCRIPTION:\n${describe.text}\n\nARTIST'S WORDS:\n${userText}`
-      : `${rules}\n\nBring the picture to life with plausible motion and atmosphere — no new characters, no scene change, no dialogue.\n\nIMAGE DESCRIPTION:\n${describe.text}`;
+      : `${rules}\n\nBring the picture to life as a dynamic, eye-catching clip in the style above — no dialogue.\n\nIMAGE DESCRIPTION:\n${describe.text}`;
 
     const r = await U.llmChat(
       [
         { role: 'user', content: sys + '\n\nRespond with ONLY the final prompt text, nothing else.' },
       ],
-      { temperature: 0.7, maxTokens: 1200, role: 'ideation' }, 'Writing the video prompt');
+      { temperature: 0.7, maxTokens: 2400, role: 'ideation' }, 'Writing the video prompt');
 
     let text = String(r.text || '').trim();
     const j = extractJson(text);
@@ -1612,7 +1648,7 @@ ${key}`;
     normalizeWorkflow, detectPromptSlots, detectSeedSlot, detectI2vInput, detectDurationSlot, extractJson, writeVideoPrompt,
     videoModelOf, writeLtxPrompt,
     writeMergePrompt, addKeyframes, nearestAspect, setAspect, ASPECTS,
-    expandSubgraphs, promptFieldOf, widgetInputs, resolvePromptTarget, qwenReferenceTarget,
+    expandSubgraphs, promptFieldOf, widgetInputs, resolvePromptTarget, qwenReferenceTarget, dropMissingWires,
     clearQwenReferences, injectQwenReferences, referencePrepLoader, referenceLimit, MAX_REFERENCE_IMAGES, ComfyDriver,
     sniffSize, engineDown, matchEditSize, qwenEditCanvas, rmlEditCanvas, referenceSlotName,
     referenceFallbackOf, routeJobsForReferences, workflowLabel, REFERENCE_FALLBACK_MODES,

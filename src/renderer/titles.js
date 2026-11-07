@@ -58,21 +58,34 @@
 
   const COMMON_OPENER_SHARE = 0.02;
 
+  const FEAT = new Map();
+  /** Cached word/bigram features of a title, so comparing many titles does not redo them. */
+  function featuresOf(title) {
+    const key = String(title ?? '');
+    let f = FEAT.get(key);
+    if (f) return f;
+    const body = bodyOf(title);
+    f = { n: norm(body), w: new Set(content(body)), bi: bigrams(body), first: words(body)[0] };
+    if (FEAT.size > 20000) FEAT.clear();
+    FEAT.set(key, f);
+    return f;
+  }
+
   /** How alike are these two titles, 0..1? */
   function similarity(a, b, voice = null) {
-    const ba = bodyOf(a), bb = bodyOf(b);
-    const na = norm(ba), nb = norm(bb);
+    const fa = featuresOf(a), fb = featuresOf(b);
+    const na = fa.n, nb = fb.n;
     if (!na || !nb) return 0;
     if (na === nb) return 1;
-    const wa = new Set(content(ba)), wb = new Set(content(bb));
+    const wa = fa.w, wb = fb.w;
     const weightOf = voice ? voice.weightOf : null;
     const tokenScore = wordScore(wa, wb, weightOf);
 
     const longer = Math.max(wa.size, wb.size);
     const charWeight = longer <= 3 ? 0.9 : longer <= 5 ? 0.6 : 0.35;
-    const charScore = overlap(bigrams(ba), bigrams(bb)) * charWeight;
+    const charScore = overlap(fa.bi, fb.bi) * charWeight;
 
-    const firstA = words(ba)[0], firstB = words(bb)[0];
+    const firstA = fa.first, firstB = fb.first;
     const shared = firstA && firstA === firstB;
     const houseOpener = shared && voice ? voice.commonOpener(firstA) : false;
     const openingBonus = shared && !houseOpener ? 0.2 : 0;
@@ -693,8 +706,25 @@
         && !['discarded', 'rejected'].includes(c.status));
       const out = [];
       const voice = this.voice();
+      const lim = this.cfg.similarityLimit;
+      const F = cards.map((c) => featuresOf(c.metadata.title));
       for (let i = 0; i < cards.length; i++) {
+        const fa = F[i];
         for (let j = i + 1; j < cards.length; j++) {
+          const fb = F[j];
+          if (fa.n && fb.n && fa.n !== fb.n) {
+            let tokenTop = 0;
+            const [sm, bg] = fa.w.size <= fb.w.size ? [fa.w, fb.w] : [fb.w, fa.w];
+            for (const x of sm) if (bg.has(x)) { tokenTop = 1; break; }
+            if (!tokenTop) {
+              const longer = Math.max(fa.w.size, fb.w.size);
+              const cw = longer <= 3 ? 0.9 : longer <= 5 ? 0.6 : 0.35;
+              const a = fa.bi.size, b = fb.bi.size;
+              const charTop = a && b ? cw * (2 * Math.min(a, b)) / (a + b) : 0;
+              const bonusTop = fa.first && fa.first === fb.first ? 0.2 : 0;
+              if (charTop + bonusTop < lim - 1e-9) continue;
+            }
+          }
           const s = similarity(cards[i].metadata.title, cards[j].metadata.title, voice);
           if (s >= this.cfg.similarityLimit) {
             out.push({ a: cards[i], b: cards[j], score: Math.round(s * 100) / 100 });

@@ -131,6 +131,18 @@ Respond ONLY with JSON:
   const lookAt = (m, form) => (form === 'after' && m.after ? m.after : [m.look, m.outfit ? `wearing ${m.outfit}` : ''].filter(Boolean).join(', '));
   const sheetOf = (m, form) => (form === 'after' && m.after ? m.afterSheet : m.sheet);
   const DEFAULT_STYLE = 'clean anime comic illustration, crisp dark lineart, flat cel shading, bright readable colours';
+  const ART_STYLES = {
+    '': { label: "Writer's choice" },
+    anime: { label: 'Anime cel', style: DEFAULT_STYLE },
+    manga: { label: 'Manga ink + screentone', style: 'black and white manga page art, bold ink lineart, screentone shading, dramatic hatching, high contrast' },
+    retro90s: { label: '90s anime', style: 'retro 1990s anime cel art, soft film grain, muted pastel palette, thick outlines, VHS-era shading' },
+    western: { label: 'Western comic', style: 'american comic book art, bold inked lineart, dynamic shading with hatching, saturated flat colours, halftone texture' },
+    webtoon: { label: 'Webtoon / manhwa', style: 'korean webtoon manhwa art, clean thin lineart, soft airbrushed gradient shading, glossy highlights, vivid colours' },
+    painterly: { label: 'Painterly', style: 'painterly digital illustration, soft brush strokes, rich lighting, detailed rendering, no harsh outlines' },
+    watercolor: { label: 'Soft watercolour', style: 'soft watercolour comic illustration, delicate ink lines, gentle washes of colour, paper texture' },
+    chibi: { label: 'Chibi / cute', style: 'cute chibi comic style, big heads, simple rounded shapes, thick clean outlines, candy colours' },
+    glossy: { label: 'Glossy anime', style: 'glossy anime illustration, sharp lineart, shiny highlights, vibrant saturated colours, detailed shading' },
+  };
   const refsOf = (m) => (Array.isArray(m && m.refs) ? m.refs.filter((r) => r && r.fname) : []);
   const locationById = (project, id) => (project.locations || []).find((l) => l.id === id) || null;
   const locationOf = (project, panel) => locationById(project, panel && panel.locationId);
@@ -664,6 +676,84 @@ Respond ONLY with JSON:
       this.persist();
     },
 
+    /**
+     * Start a comic again from a new storyboard: his addition is appended to the premise (or
+     * the premise replaced); his own reference pictures and a picked art style are kept.
+     */
+    async restart(project, { premise = null, addition = '' } = {}) {
+      if (this.isRunning(project)) this.stop(project);
+      await this.lock(project, async () => {
+        const base = premise != null && String(premise).trim() ? String(premise).trim() : String(project.premise || '').trim();
+        const add = String(addition || '').trim();
+        project.premise = add ? `${base}\nAlso: ${add}` : base;
+        const keepStyle = project.artStyle && Object.values(ART_STYLES).some((s) => s.style === project.artStyle) ? project.artStyle : '';
+        Object.assign(project, {
+          storyboarded: false, panels: [], lettered: false, page: null, template: project.format === 'story' ? 'story-left' : '',
+          cast: project.cast.filter((m) => m.fromUser), castApproved: false, artStyle: keepStyle, setting: '', locations: [],
+        });
+        for (const m of project.cast) {
+          if (!m.refAsSheet) { m.sheet = null; m.afterSheet = null; m.sheetCheck = null; m.sheetRedrawn = false; }
+          m.sheetJobId = null; m.afterJobId = null;
+          m.id = `${m.id.split('~')[0]}~${Date.now().toString(36)}`;
+        }
+        project.run = { ...project.run, phase: 'draft', note: '', error: null };
+        this.persist();
+      });
+      return this.start(project);
+    },
+
+    /**
+     * Part N+1 of a finished comic: a writer continues the story from the last part's panels,
+     * with the same cast as they ended up, art style, page look, lettering, folders and size.
+     */
+    async nextPart(prev, { direction = '', start = true } = {}) {
+      if (!prev) throw new Error('no comic');
+      if (!prev.storyboarded || !prev.panels.length) throw new Error('make this part first — the next part continues its story');
+      const n = (Number(prev.part) || 1) + 1;
+      const base = String((prev.partOf && prev.partOf.base) || prev.title || prev.name || 'Comic').replace(/\s*[—–-]\s*Part\s+\d+\s*$/i, '').trim() || 'Comic';
+      const panelsTxt = prev.panels.map((x) => `Panel ${x.n}: ${String(x.action || '').slice(0, 300)}${x.caption ? ` | caption: "${x.caption}"` : ''}${(x.lines || []).length ? ` | ${(x.lines || []).map((l) => `${l.speaker || '?'}: "${l.text}"`).join(' ')}` : ''}`).join('\n');
+      const castTxt = prev.cast.map((m) => `${m.name}: ${m.after || m.look || ''}${m.outfit ? ` (outfit: ${m.outfit})` : ''}`).join('\n');
+      const dir = String(direction || '').trim();
+      let premise = '';
+      try {
+        const { text } = await U.llmChat([{ role: 'user', content: `You continue a comic. Write the premise for PART ${n}. It picks up right where Part ${n - 1} ended: the same characters, starting in the state and place the last panel left them (what happened in the last part is NOT undone unless the direction says so). Escalate or twist: a new situation, a new consequence of what happened, or the next step of it — not a replay of Part ${n - 1}.\n\nPart ${n - 1} premise:\n${String(prev.premise || '').slice(0, 2500)}\n\nPart ${n - 1} panels:\n${panelsTxt.slice(0, 5000)}\n\nCharacters now:\n${castTxt.slice(0, 1500)}\n${dir ? `\nHIS DIRECTION FOR PART ${n} (must happen): ${dir}\n` : ''}\nWrite it the way the Part ${n - 1} premise is written (same level of detail, ${prev.panelCount || 4} panels' worth of story). Return JSON only: {"premise": "..."}` }],
+          { temperature: 0.85, maxTokens: 1800, role: 'ideation' }, `Comic Part ${n} premise`);
+        const v = U.extractJson(text) || {};
+        premise = String(v.premise || '').trim();
+      } catch (e) {  }
+      if (!premise) premise = `Part ${n}: continues straight on from Part ${n - 1} ("${base}"). ${prev.cast.map((m) => m.name).filter(Boolean).join(' and ') || 'The character'} start${prev.cast.length > 1 ? '' : 's'} as the last panel left them. ${dir || 'The story goes one step further and leads to a new situation.'}`;
+      const castRefs = prev.cast.filter((m) => m.name).map((m) => ({
+        name: m.name, look: m.after || m.look || '', outfit: m.outfit || '',
+        refs: [m.afterSheet, m.sheet, ...(m.refs || [])].filter((r) => r && r.fname).slice(0, 3),
+      }));
+      const project = this.create({
+        name: `${base} — Part ${n}`.slice(0, 80), format: prev.format, premise, theme: prev.theme || '', tone: prev.tone || '',
+        panels: prev.panelCount, takes: prev.takes, castRefs, workflow: prev.workflow || '',
+        pageStyle: prev.pageStyle, lettering: prev.letter && prev.letter.mode === 'float' ? 'float' : 'balloons',
+        sequence: !!prev.sequence, plates: prev.plates !== false,
+      });
+      if (prev.letter) project.letter = JSON.parse(JSON.stringify(prev.letter));
+      Object.assign(project, {
+        title: `${base} — Part ${n}`.slice(0, 60), titleManual: true, part: n,
+        partOf: { rootId: (prev.partOf && prev.partOf.rootId) || prev.id, prevId: prev.id, base },
+        artStyle: prev.artStyle || '', autoSend: prev.autoSend !== false, autoReroll: prev.autoReroll !== false,
+      });
+      for (const k of ['pageScale', 'galleryIds', 'galleryId', 'approveCast']) if (prev[k] !== undefined) project[k] = JSON.parse(JSON.stringify(prev[k]));
+      if (!prev.part) { prev.part = 1; prev.partOf = prev.partOf || { rootId: prev.id, base }; }
+      prev.nextPartId = project.id;
+      this.persist();
+      if (start) this.start(project);
+      return project;
+    },
+
+    galleriesOf(project) {
+      if (!project) return [];
+      if (Array.isArray(project.galleryIds)) return project.galleryIds.filter(Boolean).map(String);
+      return project.galleryId ? [String(project.galleryId)] : [];
+    },
+
+    isRunning(project) { return !!(project && project.run && project.run.active); },
+
     engineOk() {
       return ((State.settings && State.settings.gen) || {}).engine === 'comfy';
     },
@@ -847,12 +937,25 @@ Respond ONLY with JSON:
         project.panels.forEach((p) => { p.aspect = by[p.shot] || '4:3 (Standard)'; });
         return;
       }
-      if (!project.template || !L.LAYOUTS[project.template] || L.LAYOUTS[project.template].slots !== project.panels.length) {
+      if (!project.template || (project.template !== 'auto'
+        && (!L.LAYOUTS[project.template] || L.LAYOUTS[project.template].slots !== project.panels.length))) {
         project.template = L.pickLayout(project.panels.map((p) => p.shot), this.pageGeom(project, 1, ''), { sequence: !!project.sequence });
       }
-      const layout = L.layoutFor(project.template, project.panels.length);
+      const layout = this.layoutOf(project);
       const aspects = L.slotAspects(layout, { ...this.pageGeom(project, 1), top: this.titleBand(project, 1) });
       project.panels.forEach((p, i) => { p.aspect = aspects[i] || '1:1 (Square)'; });
+    },
+
+    /** The page layout, with the frame sizes he dragged when they still fit the template. */
+    layoutOf(project) {
+      const L = window.ComicLayout;
+      const base = L.layoutFor(project.template, project.panels.length);
+      const f = project.frames;
+      if (project.format === 'page' && f && f.template === project.template && Array.isArray(f.rects)
+        && f.rects.length === base.rects.length && f.rects.every((r) => r && [r.x, r.y, r.w, r.h].every(Number.isFinite))) {
+        return { ...base, rects: f.rects.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h })), custom: true };
+      }
+      return base;
     },
 
     pageGeom(project, scale = 1, template = project.template) {
@@ -869,6 +972,12 @@ Respond ONLY with JSON:
       };
     },
 
+    /** His own framing of the chosen picture, or null (automatic fit, faces centred). */
+    panelCrop(panel) {
+      const c = panel && panel.crop;
+      return c && c.of === panel.chosen && Number.isFinite(c.x) && Number.isFinite(c.y) ? c : null;
+    },
+
     titleBand(project, scale) {
       return project.letter.showTitle && (project.title || project.name) ? Math.round(86 * scale) : 0;
     },
@@ -882,7 +991,8 @@ Respond ONLY with JSON:
       const job = Pipeline.makeJob(prompt, label, 'comic');
       job.count = count;
       job.aspect = aspect || '';
-      job.workflow = project.workflow || '';
+      const editWf = String(((State.settings && State.settings.comfy) || {}).editWorkflow || '').trim();
+      job.workflow = project.workflow || (edit && editWf ? editWf : '');
       job.referenceCount = refs.length || 0;
       job.comic = { projectId: project.id, kind, panelId, castId, locationId, form, edit: !!edit, refs: refs.map((r) => r.fname) };
       job.batchId = `comic-${project.id}`;
@@ -1198,11 +1308,14 @@ Respond ONLY with JSON:
         return { width: pg.width, height: wt.height, boxes: wt.boxes, textBox: null, titleH, margin: pg.margin };
       }
       const geom = { ...pg, top: titleH };
-      const layout = L.layoutFor(project.template, project.panels.length);
-      return { width: geom.width, height: geom.height, boxes: L.panelBoxes(layout, geom), textBox: L.textBox(layout, geom), titleH, margin: pg.margin };
+      const layout = this.layoutOf(project);
+      return {
+        width: geom.width, height: geom.height, boxes: L.panelBoxes(layout, geom), textBox: L.textBox(layout, geom), titleH, margin: pg.margin,
+        rects: project.format === 'page' ? layout.rects : null, gutter: pg.gutter,
+      };
     },
 
-    async compose(project, { scale = 1, canvas = null, lettering = true, numbers = false, selected = null, selectedItem = null } = {}) {
+    async compose(project, { scale = 1, canvas = null, lettering = true, numbers = false, selected = null, selectedItem = null, hires = false } = {}) {
       const L = window.ComicLayout;
       await ensureFonts();
       const G = this.geometry(project, scale);
@@ -1226,6 +1339,7 @@ Respond ONLY with JSON:
       }
 
       const placed = [];
+      const crops = [];
       for (let i = 0; i < G.boxes.length; i++) {
         const box = G.boxes[i];
         const panel = project.panels[i];
@@ -1235,14 +1349,27 @@ Respond ONLY with JSON:
         let drawn = false;
         let crop = null;
         if (panel && panel.chosen) {
+          const up = hires && panel.chosenUp && panel.chosenUp.of === panel.chosen && panel.chosenUp.k > 1
+            ? await loadFname(panel.chosenUp.fname).catch(() => null) : null;
           const img = await loadFname(panel.chosen).catch(() => null);
-          if (img) {
+          if (img && up) {
+            const k = panel.chosenUp.k;
             const heads = ((panel.facts && panel.facts.people) || []).map((x) => x.head).filter(Boolean);
             const focus = heads.length ? {
               x: heads.reduce((a, h) => a + h[0] + h[2] / 2, 0) / heads.length,
               y: Math.min(...heads.map((h) => h[1] + h[3] / 2)),
             } : null;
-            const s = L.coverRect(img, box, focus);
+            const s = this.panelCrop(panel) ? L.cropRect(img, box, panel.crop) : L.coverRect(img, box, focus);
+            ctx.drawImage(up, s.sx * k, s.sy * k, s.sw * k, s.sh * k, box.x, box.y, box.w, box.h);
+            crop = { ...s, iw: img.naturalWidth || img.width, ih: img.naturalHeight || img.height };
+            drawn = true;
+          } else if (img) {
+            const heads = ((panel.facts && panel.facts.people) || []).map((x) => x.head).filter(Boolean);
+            const focus = heads.length ? {
+              x: heads.reduce((a, h) => a + h[0] + h[2] / 2, 0) / heads.length,
+              y: Math.min(...heads.map((h) => h[1] + h[3] / 2)),
+            } : null;
+            const s = this.panelCrop(panel) ? L.cropRect(img, box, panel.crop) : L.coverRect(img, box, focus);
             ctx.drawImage(img, s.sx, s.sy, s.sw, s.sh, box.x, box.y, box.w, box.h);
             crop = { ...s, iw: img.naturalWidth || img.width, ih: img.naturalHeight || img.height };
             drawn = true;
@@ -1250,6 +1377,7 @@ Respond ONLY with JSON:
         }
         if (!drawn) drawPlaceholder(ctx, box, panel ? `panel ${i + 1}${panel.status === 'queued' ? ' — queued' : panel.status === 'failed' ? ' — failed' : ''}` : '', scale);
 
+        crops.push(crop);
         if (panel && lettering) placed.push(this.letterPanel(ctx, project, panel, box, scale, crop));
         else placed.push([]);
         if (numbers) {
@@ -1281,6 +1409,8 @@ Respond ONLY with JSON:
       }
       cv._boxes = G.boxes;
       cv._placed = placed;
+      cv._crops = crops;
+      cv._frames = G.rects ? { rects: G.rects, margin: G.margin, top: G.titleH, width: G.width, height: G.height, gutter: G.gutter } : null;
       return cv;
     },
 
@@ -1377,11 +1507,14 @@ Respond ONLY with JSON:
       if (fit.clipped) log('the story text is longer than its column — it was cut. Shorten it, or use a taller layout.', 'err');
     },
 
-    async exportPage(project) {
-      const canvas = await this.compose(project, { scale: 1 });
-      const base64 = canvas.toDataURL('image/png').split(',')[1];
+    async exportPage(project, { writeMeta = true } = {}) {
+      const scale = [1, 1.5, 2].includes(Number(project.pageScale)) ? Number(project.pageScale) : 1;
+      const canvas = await this.compose(project, { scale, hires: scale > 1 });
+      let ext = 'png';
+      let base64 = canvas.toDataURL('image/png').split(',')[1];
+      if (base64 && base64.length * 0.75 > 25 * 1024 * 1024) { ext = 'jpg'; base64 = canvas.toDataURL('image/jpeg', 0.94).split(',')[1]; }
       if (!base64) throw new Error('the page could not be rendered');
-      const saved = await window.ala.files.saveImage(base64, 'png', `comic-${(project.title || 'page').slice(0, 20)}`);
+      const saved = await window.ala.files.saveImage(base64, ext, `comic-${(project.title || 'page').slice(0, 20)}`);
       const existing = project.page && project.page.cardId ? State.library.find((c) => c.id === project.page.cardId) : null;
       const meta = {
         title: (project.title || project.name || 'Comic').slice(0, 50),
@@ -1392,7 +1525,7 @@ Respond ONLY with JSON:
       if (existing && existing.status === 'review') {
         const old = existing.fname;
         Object.assign(existing, {
-          fname: saved.fname, path: saved.path, url: saved.url, mime: 'image/png',
+          fname: saved.fname, path: saved.path, url: saved.url, mime: ext === 'jpg' ? 'image/jpeg' : 'image/png',
           width: canvas.width, height: canvas.height, prompt: this.pagePrompt(project), updatedAt: Date.now(),
         });
         if (!existing.metadata || !existing.metadata.title) existing.metadata = meta;
@@ -1403,7 +1536,7 @@ Respond ONLY with JSON:
           id: saved.id, jobId: null, theme: project.theme || '',
           prompt: this.pagePrompt(project), promptSource: 'comic', learnedFrom: null, comicId: project.id,
           fname: saved.fname, path: saved.path, url: saved.url,
-          mime: 'image/png', width: canvas.width, height: canvas.height,
+          mime: ext === 'jpg' ? 'image/jpeg' : 'image/png', width: canvas.width, height: canvas.height,
           destination: (State.settings.publish && State.settings.publish.destination) || 'deviantart',
           status: 'review', qc: null, qcSkipped: true,
           metadata: meta, da: null, error: null,
@@ -1412,13 +1545,149 @@ Respond ONLY with JSON:
         State.library.unshift(card);
         if (window.Titles && typeof Titles.remember === 'function' && meta.title) Titles.remember(meta.title, 'card', card.id);
       }
+      const gids = this.galleriesOf(project);
+      if (gids.length) card.galleryIds = gids;
+      else if (project.galleryIds || project.galleryId === '') delete card.galleryIds;
+      if (project.series && window.Series) {
+        try { Series.onPageExported(project, card); } catch (e) { log(`series metadata failed: ${e.message}`, 'err'); }
+      }
       State.persistLibrary();
       project.page = { fname: saved.fname, url: saved.url, cardId: card.id, composedAt: Date.now() };
       project.updatedAt = Date.now();
       this.persist();
       log(`page "${project.title}" composed and sent to Review.`, 'ok');
+      if (writeMeta && card.status === 'review' && !(card.metadata && card.metadata.comicWritten) && !card.metaEdited) {
+        this.writeMetadata(project, card).catch((e) => log(`metadata for "${project.title}": ${e.message}`, 'err'));
+      }
       return card;
     },
+
+    /** Change the title: the page header is re-drawn and the Review card's title follows. */
+    async setTitle(project, title) {
+      const t = String(title || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+      if (!t) throw new Error('empty title');
+      const card = project.page && project.page.cardId ? State.library.find((c) => c.id === project.page.cardId) : null;
+      const oldTitle = project.title || project.name;
+      project.title = t;
+      project.name = t;
+      project.titleManual = true;
+      project.updatedAt = Date.now();
+      this.persist();
+      if (card && card.metadata && !card.series) {
+        const cur = String(card.metadata.title || '');
+        if (!cur || cur === oldTitle.slice(0, 50) || cur === card.metadata.titleWritten) {
+          card.metadata.title = t.slice(0, 50);
+          card.metadata.titleWritten = t.slice(0, 50);
+          if (window.Titles && Titles.remember) Titles.remember(card.metadata.title, 'card', card.id);
+        }
+      }
+      if (project.page && project.lettered && card && card.status === 'review') {
+        await this.lock(project, () => this.exportPage(project, { writeMeta: false }));
+      } else if (card) {
+        State.persistLibrary();
+      }
+      return t;
+    },
+
+    async upscaleModels() {
+      const d = new ComfyDriver();
+      const r = await d.http({ url: d.url('/models/upscale_models'), timeoutMs: 15000 });
+      const list = r.ok && Array.isArray(r.json) ? r.json : [];
+      const rank = (f) => (/anime/i.test(f) ? 0 : /ultrasharp/i.test(f) ? 1 : 2);
+      return list.slice().sort((a, b) => rank(a) - rank(b));
+    },
+
+    /** Upscale every chosen panel with ComfyUI's upscale model, for the 1.5× / 2× page sizes. */
+    async upscalePanels(project, onStep = () => {}) {
+      const models = await this.upscaleModels();
+      const model = (State.settings.comfy && State.settings.comfy.upscaleModel) || models[0];
+      if (!model) throw new Error('ComfyUI has no upscale model (models/upscale_models)');
+      const d = new ComfyDriver();
+      const todo = project.panels.filter((p) => p.chosen && !(p.chosenUp && p.chosenUp.of === p.chosen));
+      let n = 0;
+      for (const p of todo) {
+        onStep(`Upscaling panel ${p.n} (${++n}/${todo.length})…`);
+        const b64 = await window.ala.files.readImageBase64(p.chosen);
+        if (!b64) throw new Error(`panel ${p.n}: picture missing`);
+        const src = await loadImage(`data:${mimeOf(p.chosen)};base64,${b64}`);
+        const ow = src.naturalWidth || src.width;
+        const name = await d.uploadImage({ base64: b64, ext: /\.jpe?g$/i.test(p.chosen) ? 'jpg' : 'png', nameHint: `ala-comic-up-${p.n}` });
+        const graph = {
+          1: { classType: 'LoadImage', inputs: { image: name } },
+          2: { classType: 'UpscaleModelLoader', inputs: { model_name: model } },
+          3: { classType: 'ImageUpscaleWithModel', inputs: { upscale_model: ['2', 0], image: ['1', 0] } },
+          4: { classType: 'ImageScaleBy', inputs: { image: ['3', 0], upscale_method: 'lanczos', scale_by: 0.5 } },
+          5: { classType: 'SaveImage', inputs: { images: ['4', 0], filename_prefix: 'acre-comic-up' } },
+        };
+        const sub = await d.submit(graph, `ala-up-${Date.now()}`);
+        if (!sub.ok) throw new Error(`panel ${p.n}: ${sub.error}`);
+        const hist = await d.pollHistory(sub.promptId);
+        const [img] = await d.collectImages(hist);
+        const saved = await window.ala.files.saveImage(img.base64, U.extFromMime(img.mime), 'comic-panel-up');
+        if (p.chosenUp && p.chosenUp.fname) window.ala.files.deleteImage(p.chosenUp.fname).catch(() => {});
+        p.chosenUp = { fname: saved.fname, of: p.chosen, k: Math.round(((img.w || ow * 2) / ow) * 100) / 100, model };
+        this.persist();
+      }
+      return todo.length;
+    },
+
+    /** Title, description and tags written from the comic's story and dialogue (not from the picture). */
+    async writeMetadata(project, card) {
+      if (!project || !card) throw new Error('no comic / card');
+      const s = State.settings;
+      const maxTags = (s.metadata && s.metadata.maxTags) || 25;
+      const cast = (project.cast || []).map((m) => `${m.name}${m.look ? ` (${String(m.look).slice(0, 120)})` : ''}`).join('; ');
+      const panels = (project.panels || []).map((p) => {
+        const words = [p.caption ? `caption: "${p.caption}"` : '', ...(p.lines || []).map((l) => `${l.speaker || '?'}: "${l.text}"`)].filter(Boolean).join(' | ');
+        return `Panel ${p.n}: ${p.action || ''}${words ? `\n   words: ${words}` : ''}`;
+      }).join('\n');
+      const variety = window.Titles && Titles.promptBlock ? Titles.promptBlock({ prompt: this.pagePrompt(project), count: 1 }) : '';
+      const prompt = `You write the DeviantArt post for ONE finished comic page. Readers see the page; your words sell the click and the read.
+
+THE COMIC
+Title on the page: ${project.title || project.name}
+Premise: ${project.premise || ''}
+Logline: ${project.logline || ''}
+Story: ${project.story || ''}
+Theme: ${project.theme || ''}   Tone: ${project.tone || ''}
+Cast: ${cast}
+${project.sequence ? 'Format: a change sequence — the same shot, each panel the next stage of the change.\n' : ''}${panels}
+
+WRITE
+- "title": max 45 characters. Specific to THIS story (a name, what sets it off, a line, the place) — not a generic label. Banned: "Unexpected", "Journey", "Surprise", "Twist", "A New", "Ultimate", colons.
+- "alts": 3 other titles, same rules, each a different angle.
+- "description": the page retold as a short story, 220-380 words in 3-4 paragraphs, plain text, no hashtags, no emojis, never "in this comic"/"this piece". Open with one hook sentence, then follow the panels in order with concrete sensory detail (the place, the light, what sets things off, each turn as it happens, the clothes) and the characters' reactions; use the dialogue lines above word for word inside the prose. Past tense, close on the main character, by name. End on the last panel's mood, with a line that makes the reader want the next part. Avoid: "little did they know", "a wave of", "couldn't help but", "sent shivers", "newfound", "in that moment", "forever changed".
+- "tags": ${Math.min(25, maxTags)} lowercase tags, no spaces or #: comic/format tags (comic, comicpage, webcomic), the genre tags readers search for this story, then this comic's own specifics (place, outfit, character or franchise names).
+${variety ? `\n${variety}\n` : ''}
+Answer with JSON only: {"title": "...", "alts": ["...", "...", "..."], "description": "...", "tags": ["..."]}`;
+      const { text, provider, tier, model } = await U.llmChat([{ role: 'user', content: prompt }],
+        { temperature: 0.8, maxTokens: 6000, role: 'metadata' }, 'Comic metadata');
+      const raw = U.extractJson(text) || {};
+      if (!String(raw.description || '').trim()) throw new Error('the writer returned no description');
+      const meta = Pipeline.shapeMetadata(raw, card.destination || 'deviantart');
+      if (window.Growth && Growth.tagsFor && Array.isArray(raw.tags)) {
+        try { meta.tags = Growth.tagsFor({ scene: raw.tags, text: this.pagePrompt(project) }); } catch {}
+      }
+      if (card.series && window.Series) {
+        project.logline = String(raw.description).trim();
+        const keepTitle = card.metadata && card.metadata.title;
+        card.metadata = { ...(card.metadata || {}), titleWritten: '' };
+        Series.onPageExported(project, card);
+        if (keepTitle) card.metadata.title = keepTitle;
+        const own = (meta.tags || []).filter((t) => !(card.metadata.tags || []).includes(t));
+        card.metadata.tags = [...(card.metadata.tags || []), ...own].slice(0, Math.max(maxTags, 25));
+      } else {
+        card.metadata = meta;
+      }
+      card.metadata.comicWritten = true;
+      card.metaEngine = { provider, tier, model, at: Date.now() };
+      card.updatedAt = Date.now();
+      if (window.Titles && Titles.remember && card.metadata.title) Titles.remember(card.metadata.title, 'card', card.id);
+      State.persistLibrary();
+      log(`metadata written for "${card.metadata.title}".`, 'ok');
+      return card.metadata;
+    },
+
 
     pagePrompt(project) {
       const cast = (project.cast || []).map((c) => `${c.name}: ${c.look}`).join(' ');
@@ -1469,7 +1738,7 @@ Respond ONLY with JSON:
   window.ComicPrompts = {
     sheetPrompt, sheetJob, platePrompt, platesWanted, panelPrompt, normalizeStoryboard, parsePick, parseFacts, parseLetter,
     parseSheetCheck, pickMissed, castFromRef,
-    PRESETS, defaultLetter, defaultGeom, blankPanel, blankLine, blankMember, blankLocation, SHOTS, KINDS, FLOAT_COLORS,
+    PRESETS, ART_STYLES, defaultLetter, defaultGeom, blankPanel, blankLine, blankMember, blankLocation, SHOTS, KINDS, FLOAT_COLORS,
     MAX_PER_PANEL, MAX_CONTINUE_CHAIN, MAX_SEQUENCE_CHAIN,
   };
 })();

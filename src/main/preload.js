@@ -48,12 +48,16 @@ contextBridge.exposeInMainWorld('ala', {
     setOrigins: (d) => invoke('db:setOrigins', d),
     getComics: () => invoke('db:getComics'),
     setComics: (d) => invoke('db:setComics', d),
+    getSeries: () => invoke('db:getSeries'),
+    setSeries: (d) => invoke('db:setSeries', d),
     getPchCatalog: () => invoke('db:getPchCatalog'),
     setPchCatalog: (d) => invoke('db:setPchCatalog', d),
     getRequests: () => invoke('db:getRequests'),
     setRequests: (d) => invoke('db:setRequests', d),
     getOverseer: () => invoke('db:getOverseer'),
     setOverseer: (d) => invoke('db:setOverseer', d),
+    getOverseerChats: () => invoke('db:getOverseerChats'),
+    setOverseerChats: (d) => invoke('db:setOverseerChats', d),
   },
   dastats: {
     sync: (opts) => invoke('dastats:sync', opts),
@@ -110,6 +114,10 @@ contextBridge.exposeInMainWorld('ala', {
     uploadReadiness: () => invoke('da:uploadReadiness'),
     onAuthChanged: (cb) => on('da:authChanged', cb),
     onIdentity: (cb) => on('da:identity', cb),
+  },
+  channel: {
+    history: () => invoke('channel:history'),
+    snapshot: (users) => invoke('channel:snapshot', users),
   },
   daweb: {
     status: () => invoke('daweb:status'),

@@ -132,6 +132,21 @@
       label: 'Polka page — bold frames on a dotted pastel page', margin: 36, gutter: 30, border: 6, borderColor: '#111111',
       bg: { type: 'dots', color: '#fdeef5', dot: '#bccdff' }, titleColor: '#111111',
     },
+    noir: { label: 'Noir — black page, white frames', margin: 30, gutter: 18, border: 4, borderColor: '#f5f5f4', bg: { color: '#0c0a09' }, titleColor: '#f5f5f4' },
+    pop: {
+      label: 'Pop art — halftone dots on yellow, heavy frames', margin: 34, gutter: 24, border: 7, borderColor: '#111111',
+      bg: { type: 'dots', color: '#ffd23f', dot: '#f4a300' }, titleColor: '#111111',
+    },
+    sunset: {
+      label: 'Sunset — rounded panels on a warm gradient', margin: 30, gutter: 24, border: 0, radius: 18, edge: 5, edgeColor: '#fff7ed',
+      bg: { type: 'gradient', colors: ['#ffb38a', '#ff7aa2', '#8a5cf6'] }, titleColor: '#ffffff',
+    },
+    paper: { label: 'Old paper — cream page, brown ink frames', margin: 38, gutter: 22, border: 4, borderColor: '#3f2a1d', bg: { color: '#f3e7cf' }, titleColor: '#3f2a1d' },
+    neon: {
+      label: 'Neon — dark page, glowing violet frames', margin: 30, gutter: 22, border: 0, radius: 14, edge: 5, edgeColor: '#c084fc',
+      bg: { type: 'gradient', colors: ['#120c24', '#1e1038', '#0b1a2e'] }, titleColor: '#f0abfc',
+    },
+    clean: { label: 'Clean web — white page, rounded panels, no lines', margin: 28, gutter: 20, border: 0, radius: 16, bg: { color: '#ffffff' }, titleColor: '#1c1917' },
   };
   const pageStyle = (key) => PAGE_STYLES[key] || PAGE_STYLES.classic;
 
@@ -364,6 +379,87 @@
       sw, sh,
     };
   }
+
+  /** Source rectangle for a picture moved/zoomed inside its frame (crop = { x, y, z }, centre in 0..1). */
+  function cropRect(img, box, crop) {
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    if (!iw || !ih) return { sx: 0, sy: 0, sw: 0, sh: 0 };
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const z = clamp(Number(crop && crop.z) || 1, 1, 5);
+    const scale = Math.max(box.w / iw, box.h / ih) * z;
+    const sw = box.w / scale;
+    const sh = box.h / scale;
+    const cx = (crop && Number.isFinite(crop.x) ? crop.x : 0.5) * iw;
+    const cy = (crop && Number.isFinite(crop.y) ? crop.y : 0.5) * ih;
+    return { sx: clamp(cx - sw / 2, 0, iw - sw), sy: clamp(cy - sh / 2, 0, ih - sh), sw, sh };
+  }
+
+
+  const EPS = 0.002;
+  /**
+   * The shared line between panels nearest a point (page fractions): which panels end on it
+   * (before) and which start on it (after). Null when the point is not on a line.
+   */
+  function findEdge(rects, nx, ny, tolX, tolY) {
+    let best = null;
+    for (const axis of ['x', 'y']) {
+      const pos = axis === 'x' ? 'x' : 'y';
+      const len = axis === 'x' ? 'w' : 'h';
+      const opos = axis === 'x' ? 'y' : 'x';
+      const olen = axis === 'x' ? 'h' : 'w';
+      const at = axis === 'x' ? nx : ny;
+      const across = axis === 'x' ? ny : nx;
+      const tol = axis === 'x' ? tolX : tolY;
+      const values = new Set();
+      rects.forEach((r) => { const v = r[pos] + r[len]; if (v < 1 - EPS) values.add(Math.round(v * 1e4) / 1e4); });
+      for (const v of values) {
+        const d = Math.abs(at - v);
+        if (d > tol || (best && d >= best.d)) continue;
+        const touch = rects.map((r, i) => ({ r, i, end: Math.abs(r[pos] + r[len] - v) < EPS, start: Math.abs(r[pos] - v) < EPS }))
+          .filter((t) => t.end || t.start);
+        let group = touch.filter((t) => t.r[opos] - EPS <= across && across <= t.r[opos] + t.r[olen] + EPS);
+        if (!group.length) continue;
+        let lo = Math.min(...group.map((t) => t.r[opos]));
+        let hi = Math.max(...group.map((t) => t.r[opos] + t.r[olen]));
+        for (let grown = true; grown;) {
+          grown = false;
+          for (const t of touch) {
+            if (group.includes(t)) continue;
+            if (t.r[opos] <= hi + EPS && t.r[opos] + t.r[olen] >= lo - EPS) {
+              group.push(t); grown = true;
+              lo = Math.min(lo, t.r[opos]); hi = Math.max(hi, t.r[opos] + t.r[olen]);
+            }
+          }
+        }
+        const before = group.filter((t) => t.end).map((t) => t.i).sort((a, b) => a - b);
+        const after = group.filter((t) => t.start).map((t) => t.i).sort((a, b) => a - b);
+        if (before.length && after.length) best = { axis, value: v, before, after, d };
+      }
+    }
+    if (!best) return null;
+    const { d, ...edge } = best;
+    return edge;
+  }
+
+  /** Move a shared line to `value`, resizing the panels on both sides (each keeps at least `min`). */
+  function moveEdge(rects, edge, value, min = 0.08) {
+    const pos = edge.axis === 'x' ? 'x' : 'y';
+    const len = edge.axis === 'x' ? 'w' : 'h';
+    const out = rects.map((r) => ({ ...r }));
+    const lo = Math.max(...edge.before.map((i) => out[i][pos] + min));
+    const hi = Math.min(...edge.after.map((i) => out[i][pos] + out[i][len] - min));
+    if (!(lo <= hi)) return out;
+    const v = Math.round(Math.max(lo, Math.min(hi, value)) * 1e4) / 1e4;
+    for (const i of edge.before) out[i][len] = Math.round((v - out[i][pos]) * 1e4) / 1e4;
+    for (const i of edge.after) {
+      const end = out[i][pos] + out[i][len];
+      out[i][pos] = v;
+      out[i][len] = Math.round((end - v) * 1e4) / 1e4;
+    }
+    return out;
+  }
+
 
   const rectArea = (r) => Math.max(0, r.w) * Math.max(0, r.h);
   function overlap(a, b) {
@@ -740,7 +836,7 @@
     mapBox,
     LAYOUTS, ASPECTS, autoRects, layoutFor, panelBoxes, textBox, nearestAspect, aspectRatio,
     slotAspects, pickLayout, webtoonBoxes,
-    wrapText, fitFontSize, coverRect, roundRect, overlap,
+    wrapText, fitFontSize, coverRect, cropRect, findEdge, moveEdge, roundRect, overlap,
     placeBalloons, tailTip, measureBalloon, drawCaption, drawBalloon, drawSfx,
     measureFloat, drawFloat, drawSelection, selectionHandles,
     PAGE_STYLES, pageStyle, drawPageBackground, panelPath, drawPanelFrame, drawPageMarks,

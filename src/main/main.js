@@ -21,6 +21,8 @@ const comfyFind = require('./comfyfind');
 const llm = require('./llm');
 const { DAClient } = require('./da');
 const { DAWebClient } = require('./daweb');
+const { ChannelTracker } = require('./channel');
+const { resolveUploadMedia } = require('./uploadmedia');
 const { DAStatsClient } = require('./dastats');
 const { createPatreonMedia } = require('./patreon-media');
 const research = require('./research');
@@ -34,6 +36,7 @@ let win = null;
 let store = null;
 let da = null;
 let daweb = null;
+let channel = null;
 let dastats = null;
 let powerBlockerId = null;
 let patreonMedia = null;
@@ -70,6 +73,7 @@ app.on('second-instance', () => { if (win) { win.show(); } });
 app.whenReady().then(() => {
   try {
     store = new Store(app.getPath('userData'));
+    channel = new ChannelTracker(app.getPath('userData'));
     da = new DAClient(store);
     daweb = new DAWebClient('persist:da');
     dastats = new DAStatsClient(daweb);
@@ -399,12 +403,18 @@ function registerIpc() {
   h('db:setOrigins', (_e, data) => { store.origins.data = data; store.origins.save(); return true; });
   h('db:getComics', () => store.comics.data);
   h('db:setComics', (_e, data) => { store.comics.data = data; store.comics.save(); return true; });
+  h('db:getSeries', () => store.series.data);
+  h('db:setSeries', (_e, data) => { store.series.data = data; store.series.save(); return true; });
+  h('channel:history', () => channel.history());
+  h('channel:snapshot', (_e, users) => channel.snapshot(Array.isArray(users) ? users : [], { source: 'app' }));
   h('db:getPchCatalog', () => store.pchCatalog.data);
   h('db:setPchCatalog', (_e, data) => { store.pchCatalog.data = data; store.pchCatalog.save(); return true; });
   h('db:getRequests', () => store.requests.data);
   h('db:setRequests', (_e, data) => { store.requests.data = data; store.requests.save(); return true; });
   h('db:getOverseer', () => store.overseer.data);
   h('db:setOverseer', (_e, data) => { store.overseer.data = data; store.overseer.save(); return true; });
+  h('db:getOverseerChats', () => store.overseerChats.data);
+  h('db:setOverseerChats', (_e, data) => { store.overseerChats.data = data; store.overseerChats.save(); return true; });
 
   h('dastats:sync', async (_e, opts) => {
     try {
@@ -525,15 +535,15 @@ function registerIpc() {
   h('files:libraryDir', () => store.libraryDir);
   h('files:openLibrary', () => shell.openPath(store.libraryDir));
   /** How much disk the image library is actually using — Settings shows it. */
-  h('files:libraryStats', () => {
+  h('files:libraryStats', async () => {
     const dir = path.join(store.libraryDir, 'images');
     let count = 0, bytes = 0;
     try {
-      for (const f of fs.readdirSync(dir)) {
-        try {
-          const st = fs.statSync(path.join(dir, f));
-          if (st.isFile()) { count++; bytes += st.size; }
-        } catch { }
+      const names = await fs.promises.readdir(dir);
+      for (let i = 0; i < names.length; i += 64) {
+        const stats = await Promise.all(names.slice(i, i + 64).map((f) =>
+          fs.promises.stat(path.join(dir, f)).catch(() => null)));
+        for (const st of stats) if (st && st.isFile()) { count++; bytes += st.size; }
       }
     } catch { }
     return { count, bytes };
@@ -758,7 +768,7 @@ function registerIpc() {
   h('da:stashDraft', (_e, payload) => da.stashDraft(payload));
 
   h('daweb:status', () => daweb.status());
-  h('daweb:upload', (_e, payload) => daweb.uploadDraft(payload));
+  h('daweb:upload', (_e, payload) => daweb.uploadDraft(resolveUploadMedia(payload, store.libraryDir)));
   h('daweb:applyMetadata', (_e, payload) => daweb.applyMetadata(payload));
   h('daweb:publish', (_e, { deviationId }) => daweb.publishDeviation(deviationId));
   h('daweb:deleteDraft', (_e, { deviationId }) => daweb.deleteDraft(deviationId));

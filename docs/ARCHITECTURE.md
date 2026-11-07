@@ -160,6 +160,16 @@ Feeds the learning loop in insights.js. Strictly read-only: nothing is posted, e
 
 The artist writes and publishes the post themselves; this module only saves them a trip through the file dialog. They click Patreon's upload button as usual and, instead of the Windows file picker, the file input that button opened receives the selected artwork (Chrome DevTools Protocol file-chooser interception). It never creates, schedules or publishes a post.
 
+### `src/main/channel.js` <sub>(117 lines)</sub>
+
+**Daily channel counters for Statistics → Channel growth.**
+
+Reads the public DeviantArt profile page of the artist and of any reference accounts (watchers, profile views, deviations), with no login, and keeps one entry per account per day in `channel.json`, written atomically. Read-only.
+
+### `src/main/uploadmedia.js` <sub>(25 lines)</sub>
+
+**Which file a DeviantArt upload sends.** A Review card can post its still picture, its GIF or its MP4; the renderer names the media by kind and file name, and this resolves it to a path inside the library folder (base name only).
+
 ---
 
 ## Renderer core: state, UI shell, orchestration (`src/renderer/`)
@@ -448,6 +458,14 @@ Pure functions, no network, no models, so it is the half of the comic builder th
 **The Comics tab.**
 
 Brief (premise, cast pictures, format, panels, page style) and one Make button; then a live preview of the REAL page composer next to an inspector for the selected panel: takes, reroll, edit in words, and its balloons. Balloons are dragged, resized and their tails aimed directly on the canvas.
+
+### `src/renderer/series.js` / `seriesui.js` <sub>(266 + 141 lines)</sub>
+
+**Comics → Series.** A series is a named recurring story; each part is one comic page made by the comic engine. A writer plans the part from the series and the earlier parts, the page is titled "Name — Part N", filed in the series' DeviantArt folder and linked to the earlier parts.
+
+### `src/renderer/growth.js` / `growthui.js` <sub>(230 + 188 lines)</sub>
+
+**Channel growth.** The tag list for a post (the artist's own tags, the post's tags, format tags, tags learned from the best-viewed posts), what a DeviantArt upload sends (still / GIF / MP4, folders, AI label, DeviantArt Core), the watcher goal and its pace, and which kind of post works best.
 
 ### `src/renderer/continuations.js` <sub>(298 lines)</sub>
 

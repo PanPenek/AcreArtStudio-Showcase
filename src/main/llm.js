@@ -451,7 +451,7 @@ function applyJsonFallback(messages, fb) {
   return out;
 }
 
-async function callChat(endpoint, messages, { temperature, maxTokens, jsonMode, tools, jsonFallback } = {}) {
+async function callChat(endpoint, messages, { temperature, maxTokens, jsonMode, tools, jsonFallback, sessionKey } = {}) {
   if (endpoint.kind === 'cli') {
     try {
       return await runCli(endpoint, applyJsonFallback(messages, jsonFallback), { timeoutSec: endpoint.timeoutSec });
@@ -481,6 +481,7 @@ async function callChat(endpoint, messages, { temperature, maxTokens, jsonMode, 
         // JSON mode and tools are exclusive; several servers reject the pair.
         ...(useTools ? { tools, tool_choice: 'auto' } : {}),
         ...(useJsonMode && !useTools ? { response_format: { type: 'json_object' } } : {}),
+        ...(sessionKey && usesReasoningObject(endpoint) ? { session_id: String(sessionKey).slice(0, 256) } : {}),
       }),
     });
 
@@ -613,6 +614,7 @@ async function withFallback(settings, role, buildMessages, opts, routeOpts = {})
     }
   }
   const rerouteOnPolicy = !(settings && settings.routing && settings.routing.rerouteOnPolicyRefusal === false);
+  opts = { ...(opts || {}), sessionKey: (opts && opts.sessionKey) || `acre-${role || 'chat'}` };
 
   for (let i = 0; i < chain.length; i++) {
     const ep = chain[i];
@@ -831,17 +833,33 @@ async function catalogEntries(p) {
   }
 }
 
+/** USD per 1M tokens (in, cache hit, out) from a model-list entry's `pricing`, or null when the provider reports none. */
+function priceFromEntry(m) {
+  const pr = m && typeof m.pricing === 'object' && m.pricing ? m.pricing : null;
+  if (!pr) return null;
+  const per1m = (v) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e6 * 10000) / 10000 : null; };
+  const out = {
+    in: per1m(pr.prompt ?? pr.input),
+    cacheHit: per1m(pr.input_cache_read ?? pr.cache_read ?? pr.cached_input),
+    out: per1m(pr.completion ?? pr.output),
+  };
+  return out.in == null && out.out == null ? null : out;
+}
+
 /** `[{ id, contextWindow, vision }]` for the engine bar's model picker. */
 async function modelCatalog(settings, providerId) {
   const p = allProviders(settings).find((x) => x.id === providerId);
   if (!p) throw new Error('unknown provider');
   const entries = await catalogEntries(p);
+  const local = !!(p.baseUrl && isLocalUrl(p.baseUrl));
   return entries.map((m) => {
     const mods = (m.architecture && m.architecture.input_modalities) || m.input_modalities || null;
     return {
       id: String(m.id || m.name),
       contextWindow: ctxFromEntry(m),
       vision: Array.isArray(mods) ? mods.includes('image') : null,
+      price: priceFromEntry(m),
+      local,
     };
   });
 }

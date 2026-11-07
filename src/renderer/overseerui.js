@@ -100,6 +100,10 @@
         eng.addEventListener('change', (e) => this.onEngineChange(e));
       }
       State.on('llm', () => this.renderEngine());
+      this.wireChats();
+      document.addEventListener('mousedown', (e) => {
+        if (this._statusOpen && !e.target.closest('#ov-strip')) { this._statusOpen = false; this.renderStrip(); }
+      });
 
       State.on('overseer', () => this.render());
       State.on('queue', () => this.renderStrip());
@@ -248,6 +252,7 @@
       if (!btn) return;
       const act = btn.dataset.ov;
       const ov = O();
+      if (act === 'status') { this._statusOpen = !this._statusOpen; return this.renderStrip(); }
       if (act === 'stop') return ov.ask('stop');
       if (act === 'agent-on') return ov.start();
       if (act === 'agent-off') return ov.stop();
@@ -284,6 +289,7 @@
       if (!$('#pane-overseer')) return;
       this.renderModes();
       this.renderStrip();
+      this.renderChats();
       this.renderEngine();
       this.maybeRefreshEngines();
       this.renderThread();
@@ -319,21 +325,22 @@
       const e = (ov && ov._engines) || null;
       const m = e && e.main;
       const v = e && e.vision;
+      const shortModel = (s) => String(s || 'its default').split('/').pop().replace(/:.*$/, '');
       const chip = (role, x, label) => {
         const what = !x ? 'reading…'
           : x.none ? '<em>nothing can answer</em>'
-            : `<b>${esc(x.provider)}</b> · ${esc(x.model || 'its default')}`;
+            : `<b>${esc(shortModel(x.model))}</b>`;
         const tip = !x ? '' : x.none ? `Nothing in the route can answer: ${x.reason || ''}`
           : `${label}: ${x.provider} · ${x.model || 'its default'}${x.fallbacks && x.fallbacks.length ? `\nIf it fails: ${x.fallbacks.join(' → ')}` : ''}\n${role === 'vision'
             ? 'The vision model inspects every render (QC) and reads attached pictures for a text-only main model.'
             : 'The model the Overseer itself runs on.'}\nClick to switch.`;
-        return `<button class="ov-eng-chip" data-ov-eng="${role}" title="${esc(tip)}"><span class="ov-k">${label}</span><span class="ov-eng-v">${what}</span><span class="ov-eng-caret">▾</span></button>`;
+        return `<button class="ov-eng-chip" data-ov-eng="${role}" title="${esc(tip)}"><span class="ov-eng-ico" aria-label="${label}">${role === 'vision' ? '👁' : '✦'}</span><span class="ov-eng-v">${what}</span><span class="ov-eng-caret">▾</span></button>`;
       };
       const kind = m && !m.none ? m.effortKind : 'none';
       const opts = kind === 'cli' ? THINK_CLI : THINK_HTTP;
       const cur = m && !m.none ? (m.effort || 'auto') : 'auto';
       const think = `<label class="ov-eng-think" title="${esc(kind === 'none' ? 'This engine has no thinking switch the app can set.'
-        : 'How hard the main model may think before it answers. Thinking tokens are billed as output and add wait.')}"><span class="ov-k">Thinking</span>
+        : 'Thinking — how hard the main model may think before it answers. Thinking tokens are billed as output and add wait.')}"><span class="ov-eng-ico" aria-label="Thinking">🧠</span>
         <select data-ov-think ${kind === 'none' || !m || m.none ? 'disabled' : ''}>${opts.map(([val, t]) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${t}</option>`).join('')}
           ${opts.some(([val]) => val === cur) ? '' : `<option value="${esc(cur)}" selected>${esc(cur)}</option>`}</select></label>`;
 
@@ -344,7 +351,7 @@
       const level = pct == null ? '' : pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : '';
       const ctxTip = `${used != null ? `${num(used)} tokens in the last step (the provider's own count: system prompt + conversation + state block + reply).` : 'Fills in after the first reply this session.'}\n`
         + `${win ? `Window: ${num(win)} tokens — ${m.contextSource}.` : `Window: unknown — ${(m && m.contextSource) || 'no engine'}.`}\nClick to set the window by hand.`;
-      const ctx = `<button class="ov-ctx ${level}" data-ov-ctx title="${esc(ctxTip)}"><span class="ov-k">Context</span>
+      const ctx = `<button class="ov-ctx ${level}" data-ov-ctx title="${esc(`Context window\n${ctxTip}`)}">
         <span class="ov-ctx-bar"><i style="width:${pct == null ? 0 : Math.max(pct, used ? 1.5 : 0).toFixed(1)}%"></i></span>
         <span class="ov-ctx-n">${used != null ? kTok(used) : '—'} / ${win ? kTok(win) : '?'}${pct != null ? ` · ${pct < 1 && used ? '<1' : Math.round(pct)}%` : ''}</span></button>`;
 
@@ -359,18 +366,12 @@
         this.engineToast(r, 'Thinking');
         return;
       }
-      if (e.target.id === 'ov-eng-prov') this.fillEnginePop(e.target.value);
-      if (e.target.id === 'ov-eng-model') this.paintModelHint();
     },
 
     async onEngineClick(e) {
       const role = e.target.closest('[data-ov-eng]');
       if (role) { this.openEnginePop(role.dataset.ovEng); return; }
       if (e.target.closest('[data-ov-ctx]')) { this.editContext(); return; }
-      const act = e.target.closest('[data-ov-eng-act]');
-      if (!act) return;
-      if (act.dataset.ovEngAct === 'cancel') { this.closeEnginePop(); return; }
-      if (act.dataset.ovEngAct === 'apply') await this.applyEnginePop();
     },
 
     engineToast(r, what) {
@@ -392,115 +393,144 @@
       if (this._engPop && this._engPop.role === role) { this.closeEnginePop(); return; }
       this.closeEnginePop();
       const ov = O();
-      const cur = ov._engines && ov._engines[role === 'vision' ? 'vision' : 'main'];
+      const composer = $('#ov-composer');
+      const chip = document.querySelector(`[data-ov-eng="${role}"]`);
+      if (!composer) return;
       const route = await window.ala.llm.route(role === 'vision' ? 'vision' : 'overseer').catch(() => null);
       const rows = ((route && route.order) || []).map((r) => ({
         ...r, pickable: r.eligible || r.reason === 'no model set for this role',
       }));
-      this._engPop = { role, rows, catalog: new Map() };
+      if (!this._catCache) this._catCache = new Map();
+      const st = { role, rows, cur: ov._engines && ov._engines[role === 'vision' ? 'vision' : 'main'] };
+      this._engPop = st;
       const pop = document.createElement('div');
       pop.id = 'ov-engine-pop';
-      pop.className = 'ov-eng-pop';
-      pop.innerHTML = `
-        <div class="ov-eng-pop-head"><b>${role === 'vision' ? 'Vision model' : 'Main model'}</b>
-          <span class="hint">${role === 'vision' ? 'inspects every render (QC) and reads pictures for a text-only main model' : 'the model the Overseer itself runs on'} · the rest of the route stays behind it as fallback</span></div>
-        <div class="ov-eng-pop-grid">
-          <label class="fld"><span>Provider</span><select id="ov-eng-prov">${rows.map((r) => `<option value="${esc(r.id)}" ${r.pickable ? '' : 'disabled'} ${cur && r.id === cur.providerId ? 'selected' : ''}>${esc(r.name)}${r.pickable ? '' : ` — ${esc(r.reason)}`}</option>`).join('')}</select></label>
-          <label class="fld ov-eng-model-fld"><span>Model <em id="ov-eng-model-hint"></em></span><input id="ov-eng-model" list="ov-eng-models" spellcheck="false" autocomplete="off" placeholder="model id — type to search the provider's list" /><datalist id="ov-eng-models"></datalist></label>
-          <label class="fld"><span>Thinking</span><select id="ov-eng-think"></select></label>
-        </div>
-        <div class="ov-eng-pop-foot"><span class="hint" id="ov-eng-pop-msg"></span>
-          <button class="btn ghost small" data-ov-eng-act="cancel">Cancel</button>
-          <button class="btn primary small" data-ov-eng-act="apply">Use this</button></div>`;
-      $('#ov-engine').after(pop);
-      pop.addEventListener('click', (e) => this.onEngineClick(e));
-      pop.addEventListener('change', (e) => this.onEngineChange(e));
-      pop.addEventListener('input', (e) => { if (e.target.id === 'ov-eng-model') this.paintModelHint(); });
+      pop.className = 'ov-mp';
+      pop.innerHTML = `<input type="search" id="ov-mp-q" placeholder="Search models" spellcheck="false" autocomplete="off" />
+        <div class="ov-mp-list" id="ov-mp-list"></div>
+        <div class="ov-mp-foot" id="ov-mp-msg">${role === 'vision' ? 'Vision — checks renders, reads pictures for a text-only model' : 'Main model — the Overseer runs on it'} · the rest of the route stays as fallback</div>`;
+      composer.appendChild(pop);
+      if (chip) {
+        const left = chip.getBoundingClientRect().left - composer.getBoundingClientRect().left;
+        pop.style.left = `${Math.max(0, Math.min(left, composer.clientWidth - pop.offsetWidth))}px`;
+      }
+      const q = $('#ov-mp-q');
+      q.addEventListener('input', () => this.renderModelList());
       pop.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') this.closeEnginePop();
-        if (e.key === 'Enter' && e.target.id === 'ov-eng-model') { e.preventDefault(); this.applyEnginePop(); }
+        if (e.key === 'Escape') { e.preventDefault(); this.closeEnginePop(); }
+        if (e.key === 'Enter') { e.preventDefault(); const first = pop.querySelector('[data-mp-p]'); if (first) first.click(); }
       });
-      const first = (cur && rows.find((r) => r.id === cur.providerId && r.pickable)) || rows.find((r) => r.pickable);
-      if (first) { $('#ov-eng-prov').value = first.id; this.fillEnginePop(first.id); }
-      else $('#ov-eng-pop-msg').textContent = 'No provider can serve this role — set one up in Settings → Providers.';
+      pop.addEventListener('click', (e) => {
+        const r = e.target.closest('[data-mp-p]');
+        if (r) this.pickModel(r.dataset.mpP, r.dataset.mpM);
+      });
+      if (!this._mpOutside) {
+        this._mpOutside = true;
+        document.addEventListener('mousedown', (e) => {
+          if (this._engPop && !e.target.closest('#ov-engine-pop') && !e.target.closest('[data-ov-eng]')) this.closeEnginePop();
+        });
+      }
+      this.renderModelList();
+      q.focus();
+      for (const r of rows) {
+        const p = (State.settings.providers || []).find((x) => x.id === r.id);
+        if (!r.pickable || (p && p.kind === 'cli')) continue;
+        const hit = this._catCache.get(r.id);
+        if (hit && Date.now() - hit.at < 600_000) continue;
+        window.ala.llm.catalog(r.id)
+          .then((cat) => ({ cat }), (e) => ({ error: String(e.message || e).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '') }))
+          .then((res) => { this._catCache.set(r.id, { at: Date.now(), ...res }); if (this._engPop === st) this.renderModelList(); });
+      }
     },
 
-    async fillEnginePop(providerId) {
-      const st = this._engPop;
-      if (!st) return;
+    modelFor(providerId, role) {
       const s = State.settings || {};
-      const role = st.role === 'vision' ? 'vision' : 'overseer';
-      const p = providerId === 'local' ? null : (s.providers || []).find((x) => x.id === providerId);
-      const lm = s.lmStudio || {};
-      const curModel = providerId === 'local' ? ((lm.models || {})[role] || lm.model || '') : ((p && ((p.models || {})[role] || p.model)) || '');
-      const isCli = p && p.kind === 'cli';
-      const input = $('#ov-eng-model');
-      input.value = curModel;
-      const think = $('#ov-eng-think');
-      const opts = isCli ? THINK_CLI : THINK_HTTP;
-      let curEff = 'auto';
-      if (isCli) {
-        const a = Array.isArray(p.args) ? p.args : [];
-        const i = a.findIndex((x) => x === '--effort' || /^--effort=/.test(x));
-        if (i >= 0) curEff = a[i].includes('=') ? a[i].split('=')[1] : (a[i + 1] || 'auto');
-      } else {
-        const raw = providerId === 'local' ? lm.reasoningEffort : p && p.reasoningEffort;
-        const val = raw && typeof raw === 'object' ? raw[role] : raw;
-        curEff = String(val || (providerId === 'local' ? 'auto' : (role === 'vision' ? 'auto' : 'none'))).toLowerCase();
-      }
-      const cliNoEffort = isCli && !/claude/i.test(p.command || '');
-      think.innerHTML = opts.map(([v, t]) => `<option value="${v}" ${v === curEff ? 'selected' : ''}>${t}</option>`).join('');
-      think.disabled = cliNoEffort;
-      const dl = $('#ov-eng-models');
-      dl.innerHTML = '';
-      const msg = $('#ov-eng-pop-msg');
-      if (isCli) {
-        msg.textContent = 'A command-line engine has no model list: leave the model blank for its default, or type a name/alias it accepts.';
-        this.paintModelHint();
-        return;
-      }
-      msg.textContent = 'Reading the provider\'s model list…';
-      let cat = st.catalog.get(providerId);
-      if (!cat) {
-        cat = await window.ala.llm.catalog(providerId).catch((e) => ({ error: String(e.message || e).replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, '') }));
-        st.catalog.set(providerId, cat);
-      }
-      if (this._engPop !== st || $('#ov-eng-prov').value !== providerId) return;
-      if (Array.isArray(cat)) {
-        const list = role === 'vision' ? cat.filter((c) => c.vision !== false) : cat;
-        dl.innerHTML = list.slice(0, 2000).map((c) => `<option value="${esc(c.id)}">${c.contextWindow ? `${kTok(c.contextWindow)} context` : ''}${c.vision ? ' · sees images' : ''}</option>`).join('');
-        msg.textContent = `${list.length} model(s) on this provider${role === 'vision' && list.length < cat.length ? ` (${cat.length - list.length} text-only hidden)` : ''}.`;
-      } else {
-        msg.textContent = `Could not read the model list (${cat.error}). Type the model id.`;
-      }
-      this.paintModelHint();
+      const r = role === 'vision' ? 'vision' : 'overseer';
+      if (providerId === 'local') { const lm = s.lmStudio || {}; return (lm.models || {})[r] || lm.model || ''; }
+      const p = (s.providers || []).find((x) => x.id === providerId);
+      return (p && ((p.models || {})[r] || p.model)) || '';
     },
 
-    paintModelHint() {
+    recentModels() {
+      try { return JSON.parse(localStorage.getItem('ala.ovRecentModels') || '[]'); } catch { return []; }
+    },
+
+    /**
+     * The model picker: provider sections with the current model, recent picks and search over
+     * each provider's model list, with a live price line per model.
+     */
+    renderModelList() {
       const st = this._engPop;
-      const hint = $('#ov-eng-model-hint');
-      if (!st || !hint) return;
-      const cat = st.catalog.get($('#ov-eng-prov').value);
-      const id = $('#ov-eng-model').value.trim();
-      const hit = Array.isArray(cat) ? cat.find((c) => c.id === id) : null;
-      hint.textContent = hit ? `${hit.contextWindow ? `(${kTok(hit.contextWindow)} context${hit.vision ? ', sees images' : ''})` : (hit.vision ? '(sees images)' : '')}` : (id && Array.isArray(cat) ? '(not in its list)' : '');
+      const box = $('#ov-mp-list');
+      if (!st || !box) return;
+      const q = (($('#ov-mp-q') || {}).value || '').trim().toLowerCase();
+      const recent = this.recentModels();
+      const cur = st.cur && !st.cur.none ? st.cur : null;
+      const short = (id) => String(id || '').split('/').pop();
+      const usd = (v) => (v == null ? 'n/a' : v === 0 ? '$0' : `$${v < 0.1 ? +v.toFixed(3) : +v.toFixed(2)}`);
+      const priceOf = (c, local) => {
+        if (local) return '<span class="ov-mp-price">free · local</span>';
+        const pr = c && c.price;
+        if (!pr) return '<span class="ov-mp-price na" title="This provider\'s model list does not report prices">cost n/a</span>';
+        return `<span class="ov-mp-price" title="USD per 1M tokens, read live from the provider's model list">in ${usd(pr.in)} · hit ${usd(pr.cacheHit)} · out ${usd(pr.out)} <em>/1M</em></span>`;
+      };
+      const item = (pid, id, meta = '', extra = '', price = '') => {
+        const on = cur && cur.providerId === pid && String(cur.model || '') === String(id || '');
+        return `<div class="ov-mp-row ${on ? 'on' : ''} ${extra}" data-mp-p="${esc(pid)}" data-mp-m="${esc(id)}" title="${esc(id || 'its default')}">
+          <span class="nm">${esc(short(id) || 'its default')}</span><span class="meta">${meta}</span><span class="ck">${on ? '✓' : ''}</span>${price}</div>`;
+      };
+      const metaOf = (c) => `${c && c.contextWindow ? kTok(c.contextWindow) : ''}${c && c.vision ? ' 👁' : ''}`;
+      let html = '';
+      let shown = 0;
+      for (const r of st.rows) {
+        const p = (State.settings.providers || []).find((x) => x.id === r.id);
+        const isCli = !!(p && p.kind === 'cli');
+        if (!r.pickable) {
+          if (!q) html += `<div class="ov-mp-h dis" title="${esc(r.reason || '')}">${esc(r.name)} <em>— ${esc(r.reason || 'unavailable')}</em></div>`;
+          continue;
+        }
+        const c = this._catCache && this._catCache.get(r.id);
+        const list = c && Array.isArray(c.cat) ? (st.role === 'vision' ? c.cat.filter((x) => x.vision !== false) : c.cat) : null;
+        const byId = new Map((list || []).map((x) => [x.id, x]));
+        let ids;
+        if (q) {
+          ids = (list || []).filter((x) => String(x.id).toLowerCase().includes(q)).slice(0, 30).map((x) => x.id);
+        } else {
+          const set = this.modelFor(r.id, st.role);
+          ids = [set, ...recent.filter((x) => x.p === r.id && x.r === st.role).map((x) => x.m)];
+          if (list && list.length <= 8) ids.push(...list.map((x) => x.id));
+          ids = [...new Set(ids.filter((x) => x !== undefined && x !== null && (x !== '' || isCli)))];
+          if (!ids.length && isCli) ids = [''];
+        }
+        const local = r.id === 'local' || !!(list && list[0] && list[0].local);
+        const rowsHtml = ids.map((id) => item(r.id, id, metaOf(byId.get(id)), '', isCli ? '<span class="ov-mp-price na">cost n/a · subscription CLI</span>' : priceOf(byId.get(id), local))).join('');
+        const typed = q && !ids.some((id) => String(id).toLowerCase() === q) && (isCli || (list && !ids.length) || (c && c.error))
+          ? item(r.id, ($('#ov-mp-q') || {}).value.trim(), 'use this id', 'typed') : '';
+        if (q && !rowsHtml && !typed) continue;
+        const count = list ? `${list.length}` : c && c.error ? 'list unavailable' : isCli ? 'CLI' : '…';
+        html += `<div class="ov-mp-h">${esc(r.name)} <em>${esc(count)}</em></div>${rowsHtml}${typed}`;
+        if (list) shown += list.length;
+      }
+      const qi = $('#ov-mp-q');
+      if (qi && shown) qi.placeholder = `Search ${num(shown)} models`;
+      box.innerHTML = html || `<div class="ov-mp-more">${q ? 'No model matches.' : 'No provider can serve this role — Settings → Providers.'}</div>`;
     },
 
-    async applyEnginePop() {
+    async pickModel(provider, model) {
       const st = this._engPop;
       if (!st) return;
-      const provider = $('#ov-eng-prov').value;
-      const model = $('#ov-eng-model').value.trim();
-      const thinkSel = $('#ov-eng-think');
-      const thinking = thinkSel.disabled ? '' : thinkSel.value;
-      const btn = document.querySelector('[data-ov-eng-act="apply"]');
-      if (btn) btn.disabled = true;
-      const r = await O().setModel({ role: st.role, provider, model, thinking }, { fromUi: true })
+      const msg = $('#ov-mp-msg');
+      if (msg) msg.textContent = 'Switching…';
+      const r = await O().setModel({ role: st.role, provider, model }, { fromUi: true })
         .catch((e) => ({ ok: false, error: e.message }));
-      if (btn) btn.disabled = false;
       this.engineToast(r, st.role === 'vision' ? 'Vision' : 'Model');
-      if (r && r.ok) { this.closeEnginePop(); this._engSig = this.engineSig(); this.renderEngine(); }
-      else if (r) $('#ov-eng-pop-msg').textContent = r.error || 'Could not switch.';
+      if (r && r.ok) {
+        const rec = [{ p: provider, m: model, r: st.role }, ...this.recentModels().filter((x) => !(x.p === provider && x.m === model && x.r === st.role))].slice(0, 12);
+        try { localStorage.setItem('ala.ovRecentModels', JSON.stringify(rec)); } catch {  }
+        this.closeEnginePop();
+        this._engSig = this.engineSig();
+        this.renderEngine();
+      } else if (msg) msg.textContent = (r && r.error) || 'Could not switch.';
     },
 
     async editContext() {
@@ -544,11 +574,17 @@
       const nextAt = sched.nextAt ? new Date(sched.nextAt) : null;
       const spend = this.spentToday();
 
+      const open = !!this._statusOpen;
+      const label = waiting ? `${num(waiting)} in Review` : agent ? 'Agent on' : 'Status';
       strip.innerHTML = `
+      <button class="ov-status-btn ${open ? 'on' : ''}" data-ov="status" type="button" title="Standing brief, schedule, publishing, its work, tokens today">ⓘ ${esc(label)} ▾</button>
+      ${ov && ov.busy ? `<button class="btn small" data-ov="stop" ${ov._abort ? 'disabled' : ''}>${ov._abort ? 'Stopping…' : 'Stop'}</button>` : ''}
+      ${agent ? `<button class="btn ghost small" data-ov="run-now" ${ov && ov.busy ? 'disabled' : ''}>Run now</button>` : ''}
+      <div class="ov-status-pop" ${open ? '' : 'hidden'}>
       <div class="ov-cells">
         <div class="ov-cell">
           <span class="ov-k">Standing brief</span>
-          <button class="ov-v link" data-ov="brief" title="Click to edit">${o.brief ? esc(o.brief.slice(0, 90)) + (o.brief.length > 90 ? '…' : '') : '<em>not set — click to write one</em>'}</button>
+          <button class="ov-v link" data-ov="brief" title="Click to edit">${o.brief ? esc(o.brief.slice(0, 160)) + (o.brief.length > 160 ? '…' : '') : '<em>not set — click to write one</em>'}</button>
         </div>
         <div class="ov-cell">
           <span class="ov-k">Next run</span>
@@ -575,12 +611,128 @@
             : '<em>nothing spent today</em>'}</span>
         </div>
       </div>
-      <div class="ov-actions">
-        ${agent ? `<button class="btn small" data-ov="run-now" ${ov && ov.busy ? 'disabled' : ''}>Run now</button>` : ''}
-        ${ov && ov.busy ? `<button class="btn small" data-ov="stop" ${ov._abort ? 'disabled' : ''}>${ov._abort ? 'Stopping…' : 'Stop'}</button>` : ''}
-        <button class="btn ghost small" data-ov="clear" ${ov && ov.busy ? 'disabled' : ''}>Clear conversation</button>
-        <span class="hint">${this.engineLine()}</span>
+      <div class="ov-actions"><span class="hint">${this.engineLine()}</span></div>
       </div>`;
+    },
+
+
+    /** The chat bar: current chat name (click to rename), Chats ▾ with search, + New chat. */
+    wireChats() {
+      const bar = $('#ov-chats');
+      if (!bar) return;
+      bar.innerHTML = `
+        <button class="ov-chat-cur" id="ov-chat-cur" type="button" title="Click to rename this chat"></button>
+        <button class="btn ghost small" id="ov-chat-list" type="button" title="Earlier chats — search and reopen">Chats ▾</button>
+        <button class="btn ghost small" id="ov-chat-new" type="button" title="Start a new chat. This one is kept under Chats ▾.">+ New chat</button>
+        <div class="ov-chat-pop" id="ov-chat-pop" hidden>
+          <input type="search" id="ov-chat-q" placeholder="Search chats by name…" spellcheck="false" />
+          <div class="ov-chat-rows" id="ov-chat-rows"></div>
+        </div>`;
+      const pop = $('#ov-chat-pop');
+      const q = $('#ov-chat-q');
+      const busyToast = () => window.toast && window.toast('Wait for the Overseer to finish (or press Stop) before switching chats.', 'warn');
+      $('#ov-chat-cur').addEventListener('click', () => this.renameChatPrompt(O() && O().chatId));
+      $('#ov-chat-new').addEventListener('click', async () => {
+        const ov = O();
+        if (!ov) return;
+        if (ov.busy) return busyToast();
+        await ov.newChat();
+        this.closeChats();
+        $('#ov-input') && $('#ov-input').focus();
+      });
+      $('#ov-chat-list').addEventListener('click', () => {
+        if (!pop.hidden) return this.closeChats();
+        pop.hidden = false;
+        q.value = '';
+        this.renderChatRows();
+        q.focus();
+      });
+      q.addEventListener('input', () => this.renderChatRows());
+      q.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); this.closeChats(); }
+        if (e.key === 'Enter') { const first = $('#ov-chat-rows [data-chat-open]'); if (first) first.click(); }
+      });
+      $('#ov-chat-rows').addEventListener('click', async (e) => {
+        const ov = O();
+        if (!ov) return;
+        const ren = e.target.closest('[data-chat-ren]');
+        if (ren) { e.stopPropagation(); await this.renameChatPrompt(ren.dataset.chatRen); this.renderChatRows(); return; }
+        const del = e.target.closest('[data-chat-del]');
+        if (del) {
+          e.stopPropagation();
+          const id = del.dataset.chatDel;
+          const cur = id === ov.chatId;
+          if (cur && ov.busy) return busyToast();
+          if (!confirm(cur ? 'Delete this chat for good? (+ New chat keeps it instead.)' : 'Delete this chat for good?')) return;
+          await ov.deleteChat(id);
+          this.renderChatRows();
+          return;
+        }
+        const open = e.target.closest('[data-chat-open]');
+        if (!open) return;
+        const id = open.dataset.chatOpen;
+        if (id === ov.chatId) return this.closeChats();
+        if (ov.busy) return busyToast();
+        await ov.openChat(id);
+        this.closeChats();
+        const th = $('#ov-thread');
+        if (th) th.scrollTop = th.scrollHeight;
+      });
+      document.addEventListener('mousedown', (e) => {
+        if (!pop.hidden && !e.target.closest('#ov-chats')) this.closeChats();
+      });
+      this.renderChats();
+    },
+
+    closeChats() {
+      const pop = $('#ov-chat-pop');
+      if (pop) pop.hidden = true;
+    },
+
+    async renameChatPrompt(id) {
+      const ov = O();
+      if (!ov) return;
+      const row = ov.listChats().find((c) => c.id === id);
+      const next = await askText('Name this chat', row ? row.name : ov.currentChatName());
+      if (next == null) return;
+      await ov.renameChat(id, next);
+    },
+
+    renderChats() {
+      const ov = O();
+      const cur = $('#ov-chat-cur');
+      if (!ov || !cur) return;
+      const name = ov.currentChatName();
+      cur.innerHTML = `💬 <span>${esc(name)}</span> <em>✎</em>`;
+      cur.title = `${name}\nClick to rename this chat`;
+      const n = (ov.chats || []).length;
+      const list = $('#ov-chat-list');
+      if (list) list.textContent = n ? `Chats (${n}) ▾` : 'Chats ▾';
+      const nw = $('#ov-chat-new');
+      if (nw) nw.disabled = !!ov.busy;
+      const pop = $('#ov-chat-pop');
+      if (pop && !pop.hidden) this.renderChatRows();
+    },
+
+    renderChatRows() {
+      const ov = O();
+      const box = $('#ov-chat-rows');
+      if (!ov || !box) return;
+      const q = ($('#ov-chat-q') || {}).value || '';
+      const rows = ov.listChats(q);
+      const when = (t) => {
+        if (!t) return '';
+        const d = new Date(t);
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        return d >= today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      };
+      box.innerHTML = rows.length ? rows.map((c) => `<div class="ov-chat-row ${c.current ? 'on' : ''}" data-chat-open="${esc(c.id)}" title="${esc(c.name)}">
+          <div class="nm">${esc(c.name)}</div>
+          <div class="meta">${c.current ? '<b>open now</b> · ' : ''}${esc(when(c.updatedAt))} · ${c.count || 0} msg${c.inText ? ' · <em>found in the messages</em>' : ''}</div>
+          <button class="btn ghost small" data-chat-ren="${esc(c.id)}" title="Rename">✎</button>
+          <button class="btn ghost small" data-chat-del="${esc(c.id)}" title="Delete for good">🗑</button>
+        </div>`).join('')
+        : `<div class="hint" style="padding:8px">${q ? 'No chat matches.' : 'No earlier chats yet. + New chat keeps this one here.'}</div>`;
     },
 
     engineLine() {

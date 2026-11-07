@@ -137,30 +137,36 @@
     <!-- OVERSEER — the chat that runs the app. `fill` because the transcript owns the
          height and scrolls itself; a page-level scrollbar would fight the composer. -->
     <section class="tab-pane fill" id="pane-overseer">
-      <header class="pane-head ov-head">
-        <div>
-          <h1>Overseer</h1>
-          <p class="pane-sub">Tell it what you want made — or ask it to research a concept or character online, find image references, and write grounded prompts. In agent mode it wakes on its own.</p>
-        </div>
+      <header class="ov-head">
+        <h1 title="Tell it what you want made — or ask it to research a concept or character online, find image references, and write grounded prompts. In agent mode it wakes on its own.">Overseer</h1>
+        <div id="ov-chats" class="ov-chats"></div>
+        <div id="ov-strip" class="ov-strip"></div>
         <div class="ov-modes" id="ov-modes"></div>
       </header>
-      <div id="ov-strip" class="ov-strip"></div>
       <div id="ov-thread" class="ov-thread"></div>
-      <div id="ov-engine" class="ov-engine"></div>
       <div id="ov-attach-strip" class="ov-attach-strip" hidden></div>
       <div class="ov-composer" id="ov-composer">
-        <button class="btn ghost ov-attach-btn" id="btn-ov-attach" type="button" title="Attach images">📎</button>
-        <input type="file" id="ov-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
         <textarea id="ov-input" rows="2" spellcheck="false"
           placeholder="e.g. look up Frieren online, find references, and write 6 faithful prompts"></textarea>
-        <div class="ov-send">
-          <button class="btn primary" id="btn-ov-send">Send</button>
-          <button class="btn ghost small" id="btn-ov-stop" hidden>Stop</button>
+        <div class="ov-tools">
+          <button class="btn ghost ov-attach-btn" id="btn-ov-attach" type="button" title="Attach images">📎</button>
+          <input type="file" id="ov-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+          <div id="ov-engine" class="ov-engine"></div>
+          <span class="ov-keys" tabindex="0" aria-label="Keyboard shortcuts">⌨
+            <span class="ov-keys-tip" role="tooltip">
+              <b>Keys</b>
+              <span><kbd>Enter</kbd> send</span>
+              <span><kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span>
+              <span><kbd>Ctrl</kbd>+<kbd>V</kbd> or drop — attach images</span>
+              <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> jump here</span>
+              <em>It publishes only when your message says so, and only through the quality gate.</em>
+            </span>
+          </span>
+          <div class="ov-send">
+            <button class="btn ghost small" id="btn-ov-stop" hidden>Stop</button>
+            <button class="btn primary" id="btn-ov-send">Send</button>
+          </div>
         </div>
-      </div>
-      <div class="keyhint ov-keyhint">
-        <kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline · <kbd>Ctrl</kbd>+<kbd>V</kbd> / drop to attach images · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> jump here ·
-        it can only publish when you say so in the message, and only through the quality gate
       </div>
     </section>
 
@@ -559,6 +565,12 @@
         </div>
         <div id="stats-sync-status" class="hint">Never synced. This reads your published gallery through the DeviantArt tab's session — read-only, nothing is posted or changed.</div>
       </div>
+      <div class="panel" id="panel-channel">
+        <div class="panel-head"><h2>Channel growth <span class="hint">daily watchers and profile views, read from public profile pages</span></h2>
+          <div class="btn-row"><button class="btn" id="btn-cg-snap" title="Read the profile counters now (you + the reference accounts). Read-only, no login.">Snapshot now</button></div>
+        </div>
+        <div id="channel-growth" class="hint">Loading…</div>
+      </div>
       <div class="panel" id="panel-learnfrom">
         <div class="panel-head"><h2>Learning from <span class="hint">which models' posts teach the app what your audience clicks</span></h2>
           <div class="btn-row">
@@ -703,6 +715,12 @@
     <section class="tab-pane" id="pane-comics">
       <header class="pane-head"><h1>Comics</h1>
         <p class="pane-sub">One premise, one button: cast sheets, panels drawn with the same character in every one, words written to match the pictures, and the finished page in Review. Everything stays editable.</p></header>
+      <div class="panel" id="panel-series">
+        <div class="panel-head"><h2>Series <span class="hint">a named recurring story: each part is a comic page in its own DeviantArt folder</span></h2>
+          <div class="btn-row"><button class="btn primary small" id="btn-series-new">+ New series</button></div>
+        </div>
+        <div id="series-list"></div>
+      </div>
       <div class="comic-shell">
         <aside class="comic-rail">
           <div class="panel-head"><h2>Projects</h2></div>
@@ -945,6 +963,7 @@
 <!-- After insights.js: the title corpus folds in the DeviantArt titles that insights owns. -->
 <script src="titles.js"></script>
 <script src="promptstyle.js"></script>
+<script src="growth.js"></script>
 <script src="promptlab.js"></script>
 <script src="pipeline.js"></script>
 <script src="triage.js"></script>
@@ -954,6 +973,7 @@
 <script src="continuations.js"></script>
 <script src="comiclayout.js"></script>
 <script src="comics.js"></script>
+<script src="series.js"></script>
 <!-- After pipeline.js: the teaser routes the pair with Pipeline.setDestination and
      reuses its description transforms. -->
 <script src="teaser.js"></script>
@@ -972,6 +992,8 @@
 <script src="originsui.js"></script>
 <script src="continuationsui.js"></script>
 <script src="comicsui.js"></script>
+<script src="seriesui.js"></script>
+<script src="growthui.js"></script>
 <script src="pixivui.js"></script>
 <script src="overseerui.js"></script>
 <script src="triageui.js"></script>

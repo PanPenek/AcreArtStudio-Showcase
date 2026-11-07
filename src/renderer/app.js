@@ -41,6 +41,7 @@
     await Origins.init();
     await Continuations.init();
     await Comics.init();
+    if (window.Series) await Series.init();
     Pipeline.attachDriver(wvPerchance);
     await Pipeline.driver.loadCatalogCache();
 
@@ -65,10 +66,12 @@
     wireReview();
     wireDrafts();
     wireStatsTab();
+    if (window.GrowthUI) GrowthUI.init();
     wireTeach();
     OriginsUI.wire();
     ContinuationsUI.wire();
     ComicsUI.wire();
+    if (window.SeriesUI) SeriesUI.init();
     wirePerchanceTab();
     gotoPerchanceGenerator();
     wireUpscalerTab();
@@ -233,6 +236,7 @@
     reclaimKeyboard(tab);
     if (stalePanes.delete(tab) && paneRenderers[tab]) paneRenderers[tab]();
     if (tab === 'stats' && window.Insights) { Insights.relink(); renderStatsTab(); OriginsUI.render(); }
+    if (tab === 'settings' && titlesPanelStale) renderTitlesPanel();
     if (tab === 'comics' && window.ComicsUI) ComicsUI.render();
     if (tab === 'continuations' && window.ContinuationsUI) ContinuationsUI.render();
     if (tab === 'pixiv' && window.PixivUI) PixivUI.refreshStatus();
@@ -3030,6 +3034,17 @@
               ${editable ? '' : 'disabled'} title="${esc(d.note)}">${d.ico} ${d.label}</button>`).join('')}
           </div>
           <div class="dest-note hint">${esc(destNote(dests))}</div>
+          ${ ''}
+          ${dests.includes('deviantart') && (c.gif?.fname || c.video?.fname) ? (() => {
+            const dm = c.daMedia === 'gif' && c.gif?.fname ? 'gif' : c.daMedia === 'video' && c.video?.fname ? 'video' : 'image';
+            const core = !!State.settings.da?.core?.enabled;
+            return `<div class="pat-media da-media" role="group" aria-label="What to post on DeviantArt" style="margin-top:6px">
+              <span class="hint" style="align-self:center;margin-right:6px">DeviantArt gets</span>
+              <button class="pm-opt ${dm === 'image' ? 'on' : ''}" data-da-media="image" ${editable ? '' : 'disabled'} title="The still picture"><span>🖼 Still</span></button>
+              ${c.gif?.fname ? `<button class="pm-opt ${dm === 'gif' ? 'on' : ''}" data-da-media="gif" ${editable ? '' : 'disabled'} title="The animated GIF (free accounts can post GIFs)"><span>🎞 GIF</span><span class="pm-size">${c.gif.size ? (c.gif.size / 1048576).toFixed(1) + ' MB' : 'animated'}</span></button>` : ''}
+              ${c.video?.fname ? `<button class="pm-opt ${dm === 'video' ? 'on' : ''} ${core ? '' : 'off'}" data-da-media="video" ${editable ? '' : 'disabled'} title="${core ? 'The MP4 clip' : 'MP4 uploads need DeviantArt Core — turn it on in Statistics → Channel growth once you have it'}"><span>▶ MP4</span></button>` : ''}
+            </div>`;
+          })() : ''}
           ${c.pixiv?.illustId ? `<div class="hint ok px-only">on pixiv since ${esc(fmtTime(c.pixiv.at))} —
             <a href="#" data-open="${esc(c.pixiv.url || '')}">open ↗</a>
             ${ ''}
@@ -3158,6 +3173,22 @@
         State.addLog(`"${card.metadata?.title || card.fname}" now publishes to ${now}.`);
       }));
 
+    el.querySelectorAll('[data-da-media]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        const want = btn.dataset.daMedia;
+        if (want === 'video' && !State.settings.da?.core?.enabled) return toast('MP4 uploads need DeviantArt Core — post the GIF instead, or turn Core on in Statistics → Channel growth.', 'err');
+        if (want === 'image') delete card.daMedia; else card.daMedia = want;
+        if (want !== 'image' && card.metadata && window.Growth && Growth.tagsFor) {
+          const extra = Growth.tagsFor({ scene: [], format: want, text: '' }).filter((t) => /^(animation|gif|animatedgif)$/i.test(t));
+          const tags = card.metadata.tags || [];
+          for (const t of extra) if (!tags.some((x) => x.toLowerCase() === t.toLowerCase()) && tags.length < 30) tags.push(t);
+          card.metadata.tags = tags;
+        }
+        card.updatedAt = Date.now();
+        State.persistLibrary();
+        toast(`DeviantArt will get the ${want === 'image' ? 'still picture' : want === 'gif' ? 'animated GIF' : 'MP4'}.`, 'ok');
+      }));
+
     el.querySelectorAll('[data-act]').forEach((btn) =>
       btn.addEventListener('click', async () => {
         const act = btn.dataset.act;
@@ -3207,10 +3238,10 @@
           btn.textContent = 'Looking…';
           try {
             const meta = await Pipeline.enhanceCardMetadata(card);
-            toast(card.metaFromImage
+            toast(card.metaFromComic ? `Written from the comic's story and dialogue: “${meta.title}”` : card.metaFromImage
               ? `Written from the image: “${meta.title}”`
               : `The vision model could not write this one — wrote it from the prompt instead: “${meta.title}”`,
-            card.metaFromImage ? 'ok' : 'err');
+            card.metaFromImage || card.metaFromComic ? 'ok' : 'err');
           } catch (e) {
             toast('Could not write metadata: ' + e.message, 'err');
             btn.disabled = false;
@@ -5394,6 +5425,7 @@
       <div class="hint" id="comfy-find-status" style="margin:-4px 0 12px">${s.comfy?.detectedFrom ? `Found automatically: ${esc(s.comfy.detectedFrom)}.` : ''}</div>
       <div class="fld-row">
         <label class="fld"><span>Image workflow <em>(text-to-image)</em></span><select data-set="comfy.imageWorkflow" id="sel-comfy-imgwf"></select></label>
+        <label class="fld" title="Image Edit, 🩹 Fix, Overseer edits and comic sequence / continue steps. A comic's own workflow (More) still wins."><span>Edit model <em>(every edit; blank = the image workflow)</em></span><select data-set="comfy.editWorkflow" id="sel-comfy-editwf"></select></label>
         <label class="fld"><span>Video workflow <em>(image-to-video)</em></span><select data-set="comfy.videoWorkflow" id="sel-comfy-vidwf"></select></label>
         <label class="fld"><span>Fallback video model <em>(optional second video workflow — slower, better consistency; also text-only)</em></span><select data-set="comfy.ltxWorkflow" id="sel-comfy-ltxwf"></select></label>
       </div>
@@ -6045,10 +6077,23 @@
     Health.refresh().then(() => Health.render($('#glance-rows')));
   }
 
+  let titlesPanelStale = false;
+  let titlesPanelWatch = null;
   /** Title variety — the controls, and the evidence. */
   function renderTitlesPanel() {
     const root = $('#panel-titles');
     if (!root || !window.Titles) return;
+    if (!root.getClientRects().length) {
+      titlesPanelStale = true;
+      if (!titlesPanelWatch && window.IntersectionObserver) {
+        titlesPanelWatch = new IntersectionObserver((entries) => {
+          if (titlesPanelStale && entries.some((e) => e.isIntersecting)) renderTitlesPanel();
+        });
+        titlesPanelWatch.observe(root);
+      }
+      return;
+    }
+    titlesPanelStale = false;
     const cfg = Titles.cfg;
     const st = Titles.stats();
     const level = Titles.level;
@@ -6261,7 +6306,7 @@
     $$('#settings-root .set-sec').forEach((el) => el.classList.toggle('active', el.dataset.sec === id));
     $$('#settings-nav .set-nav-btn').forEach((el) => el.classList.toggle('active', el.dataset.sec === id));
     $('#settings-root').scrollTop = 0;
-    if (id === 'titles') renderTitlesPanel();
+    if (id === 'titles' || titlesPanelStale) renderTitlesPanel();
   }
 
   /** Search runs over every section at once. */
@@ -6371,12 +6416,13 @@
       ['#sel-comfy-vidwf', s.comfy?.videoWorkflow],
       ['#sel-comfy-ltxwf', s.comfy?.ltxWorkflow],
       ['#sel-comfy-reffb', s.comfy?.referenceFallbackWorkflow],
+      ['#sel-comfy-editwf', s.comfy?.editWorkflow],
     ]) {
       const sel = $(selId);
       if (!sel) continue;
-      const list = selId === '#sel-comfy-reffb'
+      const list = selId === '#sel-comfy-reffb' || selId === '#sel-comfy-editwf'
         ? files.filter((f) => !/ltx|i2v|video|minimax|fasth3/i.test(f)) : files;
-      let opts = `<option value="">${selId === '#sel-comfy-reffb' ? '(none — never switch)' : '(none)'}</option>` + list
+      let opts = `<option value="">${selId === '#sel-comfy-reffb' ? '(none — never switch)' : selId === '#sel-comfy-editwf' ? 'Same as the image workflow' : '(none)'}</option>` + list
         .map((f) => `<option value="${esc(f)}" ${f === current ? 'selected' : ''}>${esc(f)}</option>`).join('');
       if (current && !files.includes(current)) {
         opts += `<option value="${esc(current)}" selected>⚠ ${esc(current)} — not in folder</option>`;

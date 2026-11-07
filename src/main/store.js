@@ -64,6 +64,14 @@ const DEFAULT_SETTINGS = {
     allowComments: true,
     allowFreeDownload: true,
     autoPublish: true,
+    core: { enabled: false, plan: '', premiumGalleryId: '', premiumGalleryName: '' },
+  },
+  growth: {
+    username: '',
+    references: [],
+    houseTags: [],
+    goalWatchers: 15000,
+    tagTarget: 25,
   },
   patreon: {
     link: '',
@@ -636,6 +644,14 @@ class Store {
     });
     this.comics = new JsonFile(path.join(userDataDir, 'comics.json'), {
       projects: [],
+      version: 1,
+    });
+    this.overseerChats = new JsonFile(path.join(userDataDir, 'overseer-chats.json'), {
+      chats: [],
+      version: 1,
+    });
+    this.series = new JsonFile(path.join(userDataDir, 'series.json'), {
+      series: [],
       version: 1,
     });
     this.requests = new JsonFile(path.join(userDataDir, 'requests.json'), {

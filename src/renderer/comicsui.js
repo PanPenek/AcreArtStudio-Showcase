@@ -153,7 +153,6 @@
               <button class="btn" id="cx-reletter" ${p.panels.some((x) => x.chosen) ? '' : 'disabled'} title="Read the panels again and rewrite the captions and dialogue to match them">↺ Re-letter</button>
               <button class="btn primary" id="cx-export" ${p.panels.some((x) => x.chosen) ? '' : 'disabled'}>Send page to Review</button>
               <button class="btn ghost small" id="cx-letter-opts">⋯ Lettering</button>
-              <span class="hint">Click a balloon, caption or sound effect to select it: drag to move, ● aims the tail, ■ resizes, double-click rewrites, Del removes.</span>
             </div>
             <div id="cx-letter-box"></div>
             ${p.storyboarded && p.cast.length ? `<div class="panel" style="margin-top:14px">
@@ -181,12 +180,14 @@
       const renders = this.estimate(p);
       const opt = (v, cur, l) => `<option value="${v}" ${String(cur) === String(v) ? 'selected' : ''}>${l}</option>`;
       return `<div class="panel cx-brief">
-        <div class="panel-head"><h2>${esc(p.title || p.name)}</h2>
+        <div class="panel-head"><h2 id="cx-title-h" style="cursor:text" title="Click to edit the title">${esc(p.title || p.name)}</h2>
           <div class="btn-row">
-            <button class="btn ghost small" id="cx-rename">Rename</button>
+            <button class="btn ghost small" id="cx-rename" title="Change the title — the page header and the Review card follow, nothing is re-drawn">✎ Edit title</button>
             <button class="btn ghost small danger" id="cx-delete">Delete</button>
           </div>
         </div>
+        <label class="fld" style="max-width:520px"><span>Title <em>— the page header and the DeviantArt title; press Enter or click away to save</em></span>
+          <input id="cx-title-in" type="text" maxlength="60" value="${esc(p.title || p.name || '')}" placeholder="e.g. The Lighthouse Keeper" /></label>
         <label class="fld"><span>Premise <em>— what happens, in a sentence or two</em></span>
           <textarea id="cx-premise" rows="2" placeholder="e.g. a tiny robot gets lost in a huge library and finds its way home">${esc(p.premise)}</textarea></label>
         <div class="cx-cast">
@@ -211,16 +212,35 @@
         <div class="cx-row" style="margin-top:10px">
           <label class="fld slim"><span>Panels</span><select id="cx-count" ${p.storyboarded || p.format === 'story' ? 'disabled' : ''}>
             ${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => opt(n, p.panelCount, n)).join('')}</select></label>
-          <label class="fld slim"><span>Format</span><select id="cx-format" ${p.storyboarded ? 'disabled' : ''}>
+          <label class="fld" style="min-width:150px;max-width:170px"><span>Format</span><select id="cx-format" ${p.storyboarded ? 'disabled' : ''}>
             ${opt('page', p.format, 'Comic page')}${opt('webtoon', p.format, 'Webtoon strip')}${opt('story', p.format, 'Illustrated story')}</select></label>
           <label class="fld slim"><span>Takes / panel</span><select id="cx-takes">
             ${[1, 2, 3, 4].map((n) => opt(n, p.takes, n)).join('')}</select></label>
           <label class="fld" style="max-width:300px"><span>Page</span><select id="cx-pagestyle">
             ${Object.entries(ComicLayout.PAGE_STYLES).map(([k, v]) => opt(k, p.pageStyle || 'classic', esc(v.label))).join('')}</select></label>
-          <label class="fld slim"><span>Words</span><select id="cx-lettering">
+          ${this.layoutFieldHtml(p)}
+          <label class="fld" style="min-width:210px;max-width:240px"><span>Words</span><select id="cx-lettering">
             ${opt('balloons', p.letter.mode || 'balloons', 'Speech balloons')}${opt('float', p.letter.mode, 'Hand-lettered, no balloons')}</select></label>
           <label class="fld" style="max-width:260px"><span>Colours</span><select id="cx-preset">
             ${Object.entries(ComicPrompts.PRESETS).map(([k, v]) => opt(k, p.letter.preset, esc(v.label))).join('')}</select></label>
+        </div>
+        <div class="cx-row" style="margin-top:8px">
+          <label class="fld" style="max-width:220px" title="The drawing style for every cast sheet, background and panel of this comic. Changing it affects new renders only."><span>Art style</span><select id="cx-artstyle">
+            ${Object.entries(ComicPrompts.ART_STYLES || {}).map(([k, v]) => opt(k, Object.entries(ComicPrompts.ART_STYLES || {}).find(([, x]) => x.style && x.style === p.artStyle) ? Object.entries(ComicPrompts.ART_STYLES).find(([, x]) => x.style === p.artStyle)[0] : (p.artStyle ? '__own' : ''), esc(v.label))).join('')}
+            ${p.artStyle && !Object.values(ComicPrompts.ART_STYLES || {}).some((x) => x.style === p.artStyle) ? `<option value="__own" selected>${esc(('Writer: ' + p.artStyle).slice(0, 48))}…</option>` : ''}</select></label>
+          ${(() => {
+            const gal = (((State.settings || {}).da || {}).galleryCache) || [];
+            const picked = Comics.galleriesOf(p);
+            const names = picked.map((id) => (gal.find((g) => String(g.id) === id) || { name: id }).name);
+            return `<div class="fld cx-folders" style="min-width:240px;max-width:320px" title="Every DeviantArt folder this page goes into (tick several). A Series part uses its series folder."><span>DeviantArt folders <button class="btn ghost small" id="cx-folders-refresh" type="button" title="Reload your folder list from DeviantArt" style="padding:0 6px">↻</button></span>
+              <details class="cx-folder-pick"><summary>${esc(names.length ? names.join(' + ') : 'Settings default (Featured)')}</summary>
+                <div class="cx-folder-list">${gal.map((g) => `<label class="checkbox-row"><input type="checkbox" data-folder="${esc(g.id)}" ${picked.includes(String(g.id)) ? 'checked' : ''} /><span>${esc(g.name)}</span></label>`).join('') || '<span class="hint">No folders loaded — press ↻</span>'}</div>
+              </details></div>`;
+          })()}
+          <label class="fld slim" title="Bigger page = sharper words and more screen. 2× of a 6-panel page is about 2800 × 3800."><span>Page size</span><select id="cx-pagescale">
+            ${opt(1, p.pageScale || 1, '1× (normal)')}${opt(1.5, p.pageScale || 1, '1.5×')}${opt(2, p.pageScale || 1, '2× (big)')}</select></label>
+          ${(p.panels || []).some((x) => x.chosen) ? `<button class="btn ghost small" id="cx-upscale" style="align-self:flex-end" title="Upscale every chosen panel with ComfyUI's upscale model, then remake the page at the chosen size (no new renders)">✨ Upscale panels + remake page</button>
+          <span class="hint" style="align-self:flex-end">${(() => { const ch = p.panels.filter((x) => x.chosen); const up = ch.filter((x) => x.chosenUp && x.chosenUp.of === x.chosen).length; return `${up}/${ch.length} panels upscaled`; })()}</span>` : ''}
         </div>
         <div class="checkbox-row" title="One framing; every panel is the next stage of the change, drawn as an edit of the previous one; laid out side by side">
           <input type="checkbox" id="cx-sequence" ${p.sequence ? 'checked' : ''} ${p.storyboarded ? 'disabled' : ''} /><span><b>Step-by-step sequence</b> — same shot every panel, each one the next stage of the change</span></div>
@@ -241,6 +261,9 @@
             ? '<button class="btn" id="cx-stop">■ Stop</button>'
             : p.storyboarded && p.panels.length && p.panels.every((x) => x.chosen) && p.lettered && p.page ? ''
               : `<button class="btn primary" id="cx-make">${p.storyboarded ? (p.panels.every((x) => x.chosen) ? '▶ Finish the page' : '▶ Carry on') : '▶ Make the comic'}</button>`}
+          ${p.page && !p.run.active ? (() => { const nxt = p.nextPartId && Comics.get(p.nextPartId); return nxt
+            ? `<button class="btn ghost small" id="cx-open-next" data-id="${esc(nxt.id)}">→ Open ${esc(nxt.title || nxt.name)}</button>`
+            : `<input id="cx-next-dir" type="text" maxlength="300" placeholder="Part ${(Number(p.part) || 1) + 1}: what happens next (optional)" style="min-width:280px" /><button class="btn primary" id="cx-next-part" title="A new comic that carries this story on: same characters as they ended up, same style, folders and size">▶ Make Part ${(Number(p.part) || 1) + 1}</button>`; })() : ''}
           ${p.storyboarded && !p.run.active ? '<button class="btn ghost small" id="cx-restart" title="Throw the storyboard away and write a new one (pictures already drawn stay on disk)">↺ New storyboard</button>' : ''}
           <span class="hint">${esc(renders)}</span>
         </div>
@@ -332,6 +355,18 @@
       const pending = Comics.pendingJob(panel.jobId);
       return `<div class="panel-head"><h2>Panel ${panel.n} <span class="hint">of ${p.panels.length}</span></h2>
           <div class="btn-row">
+            <span class="ov-keys below" tabindex="0" aria-label="Mouse and keys" title="" id="cx-keys">⌨
+              <span class="ov-keys-tip" role="tooltip">
+                <b>Words</b>
+                <span>Click a balloon, caption or sound effect to select it · drag to move</span>
+                <span>● drag = aim the tail · ■ drag = resize</span>
+                <span>Double-click or <kbd>Enter</kbd> rewrite · <kbd>Del</kbd> remove · <kbd>Esc</kbd> deselect</span>
+                <b>Pictures</b>
+                <span>Drag a picture = move it inside its frame</span>
+                <span><kbd>Ctrl</kbd> + scroll over the selected panel = zoom (the slider in the panel box does the same; ↺ Fit resets)</span>
+                ${p.format === 'page' ? '<b>Frames</b><span>Drag the line between two panels = resize them (↺ frames next to Layout resets)</span>' : ''}
+              </span>
+            </span>
             <button class="btn ghost small" data-step="-1" ${panel.n <= 1 ? 'disabled' : ''}>‹</button>
             <button class="btn ghost small" data-step="1" ${panel.n >= p.panels.length ? 'disabled' : ''}>›</button>
           </div></div>
@@ -350,6 +385,12 @@
           <button class="btn ghost small" id="cx-show-prompt" ${p.storyboarded ? '' : 'disabled'}>⋯ Prompt</button>
           ${panel.chosen ? `<button class="btn ghost small" id="cx-zoom">🔍 Full size</button>` : ''}
         </div>
+        ${panel.chosen ? `<div class="cx-framing" title="Drag the picture on the page to move it; Ctrl + scroll over it to zoom">
+          <span class="hint">Picture in frame</span>
+          <input type="range" id="cx-crop-zoom" min="100" max="400" step="5" value="${Math.round(((Comics.panelCrop(panel) || {}).z || 1) * 100)}" />
+          <span class="hint" id="cx-crop-zoom-v">${Math.round(((Comics.panelCrop(panel) || {}).z || 1) * 100)}%</span>
+          <button class="btn ghost small" id="cx-crop-reset" ${Comics.panelCrop(panel) ? '' : 'disabled'} title="Back to the automatic fit (faces centred)">↺ Fit</button>
+        </div>` : ''}
         ${panel.chosen ? `<div class="cx-edit"><input type="text" id="cx-edit-text" placeholder="Edit in words — e.g. add a red scarf, close the eyes" />
           <button class="btn small" id="cx-edit-go" ${pending ? 'disabled' : ''}>Apply</button></div>` : ''}
         <label class="fld"><span>What the picture shows <em>— used by the next reroll</em></span>
@@ -411,6 +452,19 @@
         if (p.storyboarded) { Comics.assignLayout(p); Comics.persist(); }
         this.schedulePaint();
       });
+      bind('#cx-template', 'change', (e) => {
+        p.template = e.target.value;
+        delete p.frames;
+        if (p.storyboarded) Comics.assignLayout(p);
+        Comics.persist();
+        this.renderWork();
+      });
+      bind('#cx-frames-reset', 'click', () => {
+        delete p.frames;
+        if (p.storyboarded) Comics.assignLayout(p);
+        Comics.persist();
+        this.renderWork();
+      });
       bind('#cx-lettering', 'change', (e) => { p.letter.mode = e.target.value === 'float' ? 'float' : 'balloons'; Comics.persist(); this.schedulePaint(); });
       bind('#cx-sequence', 'change', (e) => {
         const on = e.target.checked;
@@ -460,9 +514,72 @@
         const saved = await window.ala.files.saveImage(b64, U.extFromMime(f.type || 'image/png'), 'comic-star');
         this.addStar(p, saved.fname, saved.url, f.name.replace(/\.[a-z0-9]+$/i, ''));
       });
-      bind('#cx-rename', 'click', async () => {
-        const name = await window.askText('Rename', p.title || p.name, { label: 'Title' });
-        if (name && name.trim()) { save({ title: name.trim(), name: name.trim(), titleManual: true }); this.render(); }
+      const editTitle = async () => {
+        const name = await window.askText('Edit title', p.title || p.name, { label: 'Title (page header + Review card)' });
+        if (!name || !name.trim()) return;
+        try {
+          await Comics.setTitle(p, name);
+          window.toast(p.page ? 'Title changed — page header and Review card updated.' : 'Title changed.', 'ok');
+        } catch (e) { window.toast('Could not change the title: ' + e.message, 'err'); }
+        this.render();
+      };
+      bind('#cx-rename', 'click', editTitle);
+      bind('#cx-title-h', 'click', editTitle);
+      bind('#cx-artstyle', 'change', (e) => {
+        if (e.target.value === '__own') return;
+        const st = (ComicPrompts.ART_STYLES || {})[e.target.value];
+        save({ artStyle: (st && st.style) || '' });
+        window.toast(p.storyboarded ? 'Art style set — new renders and rerolls use it.' : 'Art style set.', 'ok');
+      });
+      const saveTitle = async (e) => {
+        const v = String(e.target.value || '').trim();
+        if (!v || v === (p.title || p.name)) return;
+        try { await Comics.setTitle(p, v); window.toast(p.page ? 'Title saved — page header and Review card updated.' : 'Title saved.', 'ok'); }
+        catch (err) { window.toast('Could not change the title: ' + err.message, 'err'); }
+        this.render();
+      };
+      bind('#cx-title-in', 'change', saveTitle);
+      bind('#cx-title-in', 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
+      document.querySelectorAll('[data-folder]').forEach((cb) => cb.addEventListener('change', () => {
+        const ids = [...document.querySelectorAll('[data-folder]:checked')].map((x) => String(x.dataset.folder));
+        save({ galleryIds: ids, galleryId: undefined });
+        const card = p.page && p.page.cardId ? State.library.find((c) => c.id === p.page.cardId) : null;
+        if (card && !card.series && card.status === 'review') {
+          if (ids.length) card.galleryIds = ids; else delete card.galleryIds;
+          State.persistLibrary();
+        }
+        const sum = document.querySelector('.cx-folder-pick > summary');
+        const gal = (State.settings.da && State.settings.da.galleryCache) || [];
+        if (sum) sum.textContent = ids.length ? ids.map((id) => (gal.find((g) => String(g.id) === id) || { name: id }).name).join(' + ') : 'Settings default (Featured)';
+      }));
+      bind('#cx-folders-refresh', 'click', async (e) => {
+        e.preventDefault();
+        const res = await window.ala.daweb.galleries().catch((err) => ({ ok: false, error: err.message }));
+        if (!res.ok) { window.toast('Could not read your folders: ' + res.error, 'err'); return; }
+        State.settings = await window.ala.settings.patch({ da: { galleryCache: res.galleries } });
+        window.toast(`${res.galleries.length} folders loaded.`, 'ok');
+        this.render();
+      });
+      bind('#cx-folder', 'change', (e) => {
+        save({ galleryId: e.target.value });
+        const card = p.page && p.page.cardId ? State.library.find((c) => c.id === p.page.cardId) : null;
+        if (card && !card.series && card.status === 'review') {
+          if (e.target.value) card.galleryIds = [String(e.target.value)]; else delete card.galleryIds;
+          State.persistLibrary();
+        }
+      });
+      bind('#cx-pagescale', 'change', (e) => save({ pageScale: Number(e.target.value) || 1 }));
+      bind('#cx-upscale', 'click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+          if ((p.pageScale || 1) === 1) save({ pageScale: 2 });
+          const n = await Comics.upscalePanels(p, (m) => { btn.textContent = m; });
+          btn.textContent = 'Remaking the page…';
+          if (p.page || p.lettered) await Comics.lock(p, () => Comics.exportPage(p));
+          window.toast(`${n} panel(s) upscaled — the page in Review is now ${p.pageScale}× size.`, 'ok');
+        } catch (err) { window.toast('Upscale failed: ' + err.message, 'err'); }
+        this.render();
       });
       bind('#cx-delete', 'click', async () => {
         const withFiles = confirm(`Delete "${p.title || p.name}"?\n\nOK also deletes its panel and cast pictures from disk.\nCancel keeps the pictures and deletes only the project.`);
@@ -478,6 +595,17 @@
         } catch (e) { window.toast(e.message, 'err'); }
       });
       bind('#cx-stop', 'click', () => { Comics.stop(p); this.renderWork(); });
+      bind('#cx-next-part', 'click', async (e) => {
+        const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Writing the next part…';
+        const dirEl = document.querySelector('#cx-next-dir');
+        try {
+          const np = await Comics.nextPart(p, { direction: dirEl ? dirEl.value : '' });
+          activeId = np.id;
+          window.toast(`${np.title} started — it lands in Review when done.`, 'ok');
+          this.render();
+        } catch (err) { window.toast('Could not start the next part: ' + err.message, 'err'); btn.disabled = false; btn.textContent = 'Retry next part'; }
+      });
+      bind('#cx-open-next', 'click', (e) => { activeId = e.currentTarget.dataset.id; this.render(); });
       bind('#cx-restart', 'click', () => {
         if (!confirm('Write a new storyboard? The current panels are dropped from this comic (their pictures stay on disk).')) return;
         Object.assign(p, {
@@ -560,25 +688,19 @@
         const box = $('#cx-letter-box');
         if (!box) return;
         if (box.innerHTML) { box.innerHTML = ''; return; }
-        const L = window.ComicLayout;
-        const templates = Object.entries(L.LAYOUTS).filter(([, t]) => (p.format === 'story' ? t.kind === 'story' : t.kind === 'page' && t.slots === p.panels.length));
         box.innerHTML = `<div class="panel" style="margin-top:10px"><div class="cx-row">
           <label class="fld slim"><span>Caption size</span><input type="number" id="cx-capsize" min="12" max="60" value="${p.letter.captionSize}" /></label>
           <label class="fld slim"><span>Balloon size</span><input type="number" id="cx-bubsize" min="12" max="60" value="${p.letter.bubbleSize}" /></label>
-          ${p.format === 'page' || p.format === 'story' ? `<label class="fld"><span>Layout</span><select id="cx-template">
-            ${templates.map(([id, t]) => `<option value="${id}" ${p.template === id ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
-            ${p.format === 'page' ? `<option value="auto" ${p.template === 'auto' ? 'selected' : ''}>Auto grid</option>` : ''}</select></label>` : ''}
           <div class="checkbox-row"><input type="checkbox" id="cx-showtitle" ${p.letter.showTitle ? 'checked' : ''} /><span>Title on the page</span></div>
           <label class="fld slim"><span>Signature</span><input type="text" id="cx-signature" value="${esc(p.letter.signature || '')}" placeholder="@yourname" /></label>
           <label class="fld slim"><span>Page no.</span><input type="text" id="cx-pageno" value="${esc(p.letter.pageNo || '')}" placeholder="1" style="width:60px" /></label>
-        </div><div class="hint">A different layout changes the panel shapes; panels already drawn are cropped to fit, rerolls use the new shape.</div></div>`;
+        </div><div class="hint">Layout is in the row above, next to Page.</div></div>`;
         const num = (sel, key, d) => bind(sel, 'change', (e) => { p.letter[key] = Math.max(12, Math.min(60, Number(e.target.value) || d)); Comics.persist(); this.schedulePaint(); });
         num('#cx-capsize', 'captionSize', 25);
         num('#cx-bubsize', 'bubbleSize', 26);
         bind('#cx-showtitle', 'change', (e) => { p.letter.showTitle = e.target.checked; Comics.persist(); this.schedulePaint(); });
         bind('#cx-signature', 'input', U.debounce((e) => { p.letter.signature = e.target.value.slice(0, 40); Comics.persist(); this.schedulePaint(); }, 300));
         bind('#cx-pageno', 'input', U.debounce((e) => { p.letter.pageNo = e.target.value.slice(0, 8); Comics.persist(); this.schedulePaint(); }, 300));
-        bind('#cx-template', 'change', (e) => { p.template = e.target.value; Comics.assignLayout(p); Comics.persist(); this.schedulePaint(); });
       });
       bind('#cx-approve', 'click', () => { Comics.approveCast(p); this.renderWork(); });
       document.querySelectorAll('[data-resheet]').forEach((b) => b.addEventListener('click', () => {
@@ -623,6 +745,16 @@
         Comics.choose(p, panel, b.dataset.take);
         this.renderWork();
       }));
+      bind('#cx-crop-zoom', 'input', (e) => {
+        const z = Math.max(1, Math.min(4, Number(e.target.value) / 100 || 1));
+        this.setCrop(p, panel, { z });
+        const v = $('#cx-crop-zoom-v');
+        if (v) v.textContent = `${Math.round(z * 100)}%`;
+        const r = $('#cx-crop-reset');
+        if (r) r.disabled = false;
+      });
+      bind('#cx-crop-zoom', 'change', () => Comics.persist());
+      bind('#cx-crop-reset', 'click', () => { delete panel.crop; Comics.persist(); this.refreshInspector(p); });
       bind('#cx-reroll-panel', 'click', () => { Comics.reroll(p, panel); this.renderWork(); window.toast(`Panel ${panel.n} queued again.`, 'ok'); });
       bind('#cx-show-prompt', 'click', () => {
         const built = ComicPrompts.panelPrompt(p, panel);
@@ -845,9 +977,64 @@
       ta.onblur = () => done(true);
     },
 
+    /** The Layout picker next to Page, with ↺ frames when he has dragged the frame sizes. */
+    layoutFieldHtml(p) {
+      if (p.format !== 'page' && p.format !== 'story') return '';
+      const L = window.ComicLayout;
+      const n = p.panels.length || p.panelCount;
+      const list = Object.entries(L.LAYOUTS).filter(([, t]) => (p.format === 'story' ? t.kind === 'story' : t.kind === 'page' && t.slots === n));
+      const known = p.template === 'auto' || list.some(([id]) => id === p.template);
+      const opts = (p.format === 'page' && !known ? '<option value="" selected>Pick for me (from the shots)</option>' : '')
+        + list.map(([id, t]) => `<option value="${id}" ${p.template === id ? 'selected' : ''}>${esc(t.label)}</option>`).join('')
+        + (p.format === 'page' ? `<option value="auto" ${p.template === 'auto' ? 'selected' : ''}>Auto grid</option>` : '');
+      const custom = p.storyboarded && Comics.layoutOf(p).custom;
+      return `<div class="fld" style="min-width:230px;max-width:320px" title="How the panels sit on the page. Panels already drawn are cropped to the new shapes; rerolls render at the new shape. Drag the line between two panels on the page to resize them.">
+        <span>Layout${custom ? ' <button class="btn ghost small" id="cx-frames-reset" type="button" style="padding:0 6px" title="Undo the frame sizes you dragged">↺ frames</button>' : ''}</span>
+        <select id="cx-template">${opts}</select></div>`;
+    },
+
+    /** Where the chosen picture sits in panel idx right now (for drag-to-move and Ctrl+scroll zoom). */
+    cropModel(p, idx) {
+      const canvas = $('#cx-canvas');
+      const c = canvas && canvas._crops ? canvas._crops[idx] : null;
+      const box = canvas && canvas._boxes ? canvas._boxes[idx] : null;
+      const panel = p.panels[idx];
+      if (!c || !c.iw || !c.ih || !box || !panel || !panel.chosen) return null;
+      const own = Comics.panelCrop(panel);
+      const z = own ? Math.max(1, Math.min(4, Number(own.z) || 1)) : 1;
+      const base = Math.max(box.w / c.iw, box.h / c.ih);
+      const sw = box.w / (base * z);
+      const sh = box.h / (base * z);
+      const cl = (v, lo, hi) => (lo > hi ? 0.5 : Math.max(lo, Math.min(hi, v)));
+      const x = cl(own ? own.x : (c.sx + c.sw / 2) / c.iw, sw / 2 / c.iw, 1 - sw / 2 / c.iw);
+      const y = cl(own ? own.y : (c.sy + c.sh / 2) / c.ih, sh / 2 / c.ih, 1 - sh / 2 / c.ih);
+      return { iw: c.iw, ih: c.ih, box, base, z, x, y, sw, sh };
+    },
+
+    setCrop(p, panel, patch) {
+      const m = this.cropModel(p, p.panels.indexOf(panel));
+      const own = Comics.panelCrop(panel);
+      const from = own || (m ? { x: m.x, y: m.y, z: 1 } : { x: 0.5, y: 0.4, z: 1 });
+      panel.crop = { of: panel.chosen, x: from.x, y: from.y, z: from.z || 1, ...patch };
+      this.schedulePaint();
+    },
+
     wireCanvas(p) {
       const canvas = $('#cx-canvas');
       if (!canvas) return;
+      const persistSoon = U.debounce(() => Comics.persist(), 500);
+      const edgeAt = (pt) => {
+        const fr = canvas._frames;
+        if (!fr || p.format !== 'page' || !Array.isArray(fr.rects)) return null;
+        const innerW = fr.width - fr.margin * 2;
+        const innerH = fr.height - fr.top - fr.margin * 2;
+        if (!(innerW > 0 && innerH > 0)) return null;
+        const r = canvas.getBoundingClientRect();
+        const perPx = r.width ? canvas.width / r.width : 1;
+        const tol = (fr.gutter || 0) / 2 + 6 * perPx;
+        const edge = ComicLayout.findEdge(fr.rects, (pt.x - fr.margin) / innerW, (pt.y - fr.top - fr.margin) / innerH, tol / innerW, tol / innerH);
+        return edge ? { edge, fr: { innerW, innerH, margin: fr.margin, top: fr.top, rects: fr.rects } } : null;
+      };
       const toCanvas = (ev) => {
         const r = canvas.getBoundingClientRect();
         return { x: (ev.clientX - r.left) * (canvas.width / r.width), y: (ev.clientY - r.top) * (canvas.height / r.height) };
@@ -893,20 +1080,95 @@
           if (panel.id !== selectedPanel) { selectedPanel = panel.id; this.refreshInspector(p); } else this.schedulePaint();
           return;
         }
+        const grab = edgeAt(pt);
+        if (grab) {
+          ev.preventDefault();
+          if (selItem) selItem = null;
+          drag = { mode: 'edge', edge: grab.edge, fr: grab.fr, rects0: grab.fr.rects.map((r) => ({ ...r })), moved: false, p, canvas };
+          canvas.classList.add('dragging');
+          return;
+        }
         if (selItem) { selItem = null; this.schedulePaint(); }
         if (idx < 0) return;
         const panel = p.panels[idx];
         if (panel && panel.id !== selectedPanel) { selectedPanel = panel.id; this.refreshInspector(p); }
+        const m = panel && panel.chosen ? this.cropModel(p, idx) : null;
+        if (m) {
+          ev.preventDefault();
+          drag = { mode: 'pan', panelIdx: idx, start: pt, m0: m, moved: false, p, canvas };
+          canvas.classList.add('dragging');
+        }
       });
+      canvas.addEventListener('wheel', (ev) => {
+        if (!ev.ctrlKey) return;
+        const pt = toCanvas(ev);
+        const idx = panelAt(pt);
+        const panel = idx >= 0 ? p.panels[idx] : null;
+        if (!panel || panel.id !== selectedPanel || !panel.chosen) return;
+        const m = this.cropModel(p, idx);
+        if (!m) return;
+        ev.preventDefault();
+        const z = Math.max(1, Math.min(4, m.z * (ev.deltaY < 0 ? 1.1 : 1 / 1.1)));
+        const sw = m.box.w / (m.base * z);
+        const sh = m.box.h / (m.base * z);
+        const fx = (pt.x - m.box.x) / m.box.w;
+        const fy = (pt.y - m.box.y) / m.box.h;
+        const px = (m.x * m.iw - m.sw / 2) + fx * m.sw;
+        const py = (m.y * m.ih - m.sh / 2) + fy * m.sh;
+        const cl = (v, lo, hi) => (lo > hi ? 0.5 : Math.max(lo, Math.min(hi, v)));
+        panel.crop = {
+          of: panel.chosen, z: Math.round(z * 1000) / 1000,
+          x: cl((px - fx * sw + sw / 2) / m.iw, sw / 2 / m.iw, 1 - sw / 2 / m.iw),
+          y: cl((py - fy * sh + sh / 2) / m.ih, sh / 2 / m.ih, 1 - sh / 2 / m.ih),
+        };
+        const zi = $('#cx-crop-zoom');
+        if (zi) zi.value = String(Math.round(z * 100));
+        const zv = $('#cx-crop-zoom-v');
+        if (zv) zv.textContent = `${Math.round(z * 100)}%`;
+        const rs = $('#cx-crop-reset');
+        if (rs) rs.disabled = false;
+        this.schedulePaint();
+        persistSoon();
+      }, { passive: false });
       canvas.addEventListener('dblclick', (ev) => {
         if (!selItem) return;
         ev.preventDefault();
         this.inlineEdit(p);
       });
       canvas.addEventListener('mousemove', (ev) => {
-        if (!drag) return;
+        if (!drag) {
+          const pt = toCanvas(ev);
+          const g = edgeAt(pt);
+          const idx = panelAt(pt);
+          canvas.style.cursor = g ? (g.edge.axis === 'x' ? 'col-resize' : 'row-resize')
+            : idx >= 0 && p.panels[idx] && p.panels[idx].chosen ? 'grab' : '';
+          return;
+        }
         const pt = toCanvas(ev);
         drag.moved = true;
+        if (drag.mode === 'edge') {
+          const { fr, edge } = drag;
+          const v = edge.axis === 'x' ? (pt.x - fr.margin) / fr.innerW : (pt.y - fr.top - fr.margin) / fr.innerH;
+          p.frames = { template: p.template, rects: ComicLayout.moveEdge(drag.rects0, edge, v) };
+          this.schedulePaint();
+          return;
+        }
+        if (drag.mode === 'pan') {
+          const m = drag.m0;
+          const panel = p.panels[drag.panelIdx];
+          if (!panel || !panel.chosen) return;
+          const cl = (v, lo, hi) => (lo > hi ? 0.5 : Math.max(lo, Math.min(hi, v)));
+          const k = m.sw / m.box.w;
+          panel.crop = {
+            of: panel.chosen, z: m.z,
+            x: cl(m.x - ((pt.x - drag.start.x) * k) / m.iw, m.sw / 2 / m.iw, 1 - m.sw / 2 / m.iw),
+            y: cl(m.y - ((pt.y - drag.start.y) * k) / m.ih, m.sh / 2 / m.ih, 1 - m.sh / 2 / m.ih),
+          };
+          const rs = $('#cx-crop-reset');
+          if (rs) rs.disabled = false;
+          this.schedulePaint();
+          return;
+        }
         const cl = (v, lo = 0.02, hi = 0.98) => Math.max(lo, Math.min(hi, v));
         if (drag.mode === 'move') {
           const box = canvas._boxes[drag.panelIdx];
@@ -956,6 +1218,11 @@
       const d = drag;
       drag = null;
       d.canvas.classList.remove('dragging');
+      if (d.mode === 'edge') {
+        if (d.moved) { if (d.p.storyboarded) Comics.assignLayout(d.p); Comics.persist(); this.renderWork(); }
+        return;
+      }
+      if (d.mode === 'pan') { if (d.moved) Comics.persist(); return; }
       if (d.moved) { Comics.persist(); this.refreshInspector(d.p); }
     },
 
