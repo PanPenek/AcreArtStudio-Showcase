@@ -395,6 +395,17 @@
       if (!opts.quiet) this.emit('library', this.library);
     },
 
+    /**
+     * Is this file still shown by another card? Sell / subscriber copies share their parent's
+     * picture, clip and GIF, so replacing or deleting a file must ask first. kind: image | video | gif.
+     */
+    mediaInUse(kind, fname, except = null) {
+      if (!fname) return false;
+      return (this.library || []).some((c) => c && c !== except && (kind === 'image'
+        ? (c.fname === fname || !!(c.upscaled && c.upscaled.backup === fname))
+        : !!(c[kind] && c[kind].fname === fname)));
+    },
+
     /** Send any save still waiting on its debounce. */
     flushPersists() {
       persistQueueDebounced.flush();

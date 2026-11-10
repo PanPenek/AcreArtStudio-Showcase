@@ -289,12 +289,15 @@
           ${sheet ? `<img src="${esc(sheet.url || `ala://img/${sheet.fname}`)}" alt="" data-zoom="${esc(sheet.url || `ala://img/${sheet.fname}`)}" />`
             : `<div class="cx-empty">${jobId ? 'drawing…' : 'not drawn yet'}</div>`}
           <div class="nm" title="${esc(form === 'after' ? m.after : `${m.look} ${m.outfit}`)}">${esc(m.name)}${form === 'after' ? ' · after' : ''} ${form === 'before' ? check : ''}</div>
-          ${form === 'before' && refs.length ? `<div class="cx-refs" title="Reference pictures this sheet is drawn from">${refs.map((r) => `<img src="${esc(r.url || `ala://img/${r.fname}`)}" alt="" data-zoom="${esc(r.url || `ala://img/${r.fname}`)}" />`).join('')}</div>` : ''}
-          <div class="btn-row">
-            ${p.storyboarded ? `<button class="btn ghost small" data-resheet="${m.id}:${form}" ${jobId ? 'disabled' : ''}>🔁 Redraw</button>` : ''}
-            ${form === 'before' && p.storyboarded ? `<button class="btn ghost small" data-addref="${m.id}:library" title="Add a library picture of ${esc(m.name)} and redraw the sheet from it">+ Ref (library)</button>
-            <button class="btn ghost small" data-addref="${m.id}:file" title="Add a picture file of ${esc(m.name)} and redraw the sheet from it">+ Ref (file)</button>` : ''}
-          </div>
+          ${form === 'before' && refs.length ? `<div class="cx-refs ${m.noRefs ? 'off' : ''}" title="${m.noRefs ? 'Not used: this sheet is drawn from the words only' : 'Reference pictures this sheet is drawn from'}">${refs.map((r) => `<img src="${esc(r.url || `ala://img/${r.fname}`)}" alt="" data-zoom="${esc(r.url || `ala://img/${r.fname}`)}" />`).join('')}</div>` : ''}
+          ${p.storyboarded ? `<textarea class="cx-sheetnote" data-sheetnote="${m.id}:${form}" rows="2" placeholder="What to change…" title="Your instruction for this sheet (e.g. bigger blue eyes, younger face) — used every time it is redrawn. Enter = Redraw, Shift+Enter = new line.">${esc((m.sheetNotes && m.sheetNotes[form]) || '')}</textarea>
+          <div class="cx-sheet-acts">
+            <button class="btn small cx-redraw" data-resheet="${m.id}:${form}" ${jobId ? 'disabled' : ''} title="Draw this sheet again, with the change typed above">🔁 Redraw</button>
+            ${form === 'before' ? `<span class="cx-addref"><span class="hint">Ref</span>
+              <button class="btn ghost small" data-addref="${m.id}:library" title="Add a library picture of ${esc(m.name)} and redraw the sheet from it">+ Library</button>
+              <button class="btn ghost small" data-addref="${m.id}:file" title="Add a picture file of ${esc(m.name)} and redraw the sheet from it">+ File</button>
+              ${refs.length ? `<button class="btn ghost small" data-norefs="${m.id}" title="${m.noRefs ? 'Use the reference pictures again on the next redraw' : 'Draw the next redraw from the words only (when it copies the reference too closely)'}">${m.noRefs ? 'Use refs' : 'Words only'}</button>` : ''}</span>` : ''}
+          </div>` : ''}
         </div>`;
         return card(m.sheet, 'before', m.sheetJobId) + (m.after ? card(m.afterSheet, 'after', m.afterJobId) : '');
       }).join('');
@@ -703,10 +706,28 @@
         bind('#cx-pageno', 'input', U.debounce((e) => { p.letter.pageNo = e.target.value.slice(0, 8); Comics.persist(); this.schedulePaint(); }, 300));
       });
       bind('#cx-approve', 'click', () => { Comics.approveCast(p); this.renderWork(); });
-      document.querySelectorAll('[data-resheet]').forEach((b) => b.addEventListener('click', () => {
-        const [id, form] = b.dataset.resheet.split(':');
+      const redrawSheet = (key) => {
+        const [id, form] = key.split(':');
         const m = p.cast.find((x) => x.id === id);
-        if (m) { Comics.rerollSheet(p, m, form); this.renderWork(); }
+        if (!m) return;
+        const box = document.querySelector(`[data-sheetnote="${key}"]`);
+        Comics.rerollSheet(p, m, form, box ? { instruction: box.value } : {});
+        if (form === 'before' && m.after) window.toast(`Redrawing ${m.name}; the "after" sheet is redrawn from the new one when it lands.`, 'ok');
+        this.renderWork();
+      };
+      document.querySelectorAll('[data-resheet]').forEach((b) => b.addEventListener('click', () => redrawSheet(b.dataset.resheet)));
+      document.querySelectorAll('[data-norefs]').forEach((b) => b.addEventListener('click', () => {
+        const m = p.cast.find((x) => x.id === b.dataset.norefs);
+        if (!m) return;
+        m.noRefs = !m.noRefs;
+        Comics.persist();
+        this.renderWork();
+      }));
+      document.querySelectorAll('[data-sheetnote]').forEach((t) => t.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || e.shiftKey) return;
+        e.preventDefault();
+        const btn = document.querySelector(`[data-resheet="${t.dataset.sheetnote}"]`);
+        if (btn && !btn.disabled) redrawSheet(t.dataset.sheetnote);
       }));
       document.querySelectorAll('[data-addref]').forEach((b) => b.addEventListener('click', () => {
         const [mid, source] = b.dataset.addref.split(':');
@@ -729,7 +750,8 @@
         const loc = (p.locations || []).find((l) => l.id === t.dataset.placelook);
         if (loc) { loc.look = t.value.trim(); Comics.persist(); }
       }, 400)));
-      document.querySelectorAll('[data-zoom]').forEach((img) => img.addEventListener('click', () => this.zoom(img.dataset.zoom)));
+      const work = $('#comic-work');
+      if (work) work.querySelectorAll('[data-zoom]').forEach((img) => img.addEventListener('click', () => this.zoom(img.dataset.zoom)));
       this.wireCanvas(p);
     },
 

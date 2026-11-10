@@ -41,6 +41,7 @@ let dastats = null;
 let powerBlockerId = null;
 let patreonMedia = null;
 const START_HIDDEN = process.argv.includes('--start-hidden');
+const isHttpUrl = (u) => { try { return ['https:', 'http:'].includes(new URL(String(u)).protocol); } catch { return false; } };
 
 // Installs from before the rename to Acre Art Studio keep their data folder;
 // new installs use %APPDATA%\Acre Art Studio.
@@ -333,7 +334,7 @@ function installWebviewOpenHandler() {
         try { opener = contents.getURL() || ''; } catch { }
         if (/^https:\/\/[\w.-]*pixiv\.net\//.test(opener)) return { action: 'allow' };
       }
-      shell.openExternal(url).catch(() => {});
+      if (isHttpUrl(url)) shell.openExternal(url).catch(() => {});
       return { action: 'deny' };
     });
   });
@@ -584,9 +585,8 @@ function registerIpc() {
   h('comfy:startServer', (_e, { command }) => {
     const cmd = String(command || '').trim();
     if (!cmd) return { ok: false, error: 'no launch command' };
-    const parts = (cmd.match(/"[^"]*"|\S+/g) || []).map((t) => t.replace(/^"(.*)"$/, '$1'));
     try {
-      const child = spawn(parts[0], parts.slice(1), { detached: true, stdio: 'ignore', windowsHide: false });
+      const child = spawn(cmd, { shell: true, detached: true, stdio: 'ignore', windowsHide: false });
       child.on('error', (e) => console.error('[comfy] launch failed:', e.message));
       child.unref();
       return { ok: true, pid: child.pid };
@@ -777,6 +777,11 @@ function registerIpc() {
     try { return await daweb.galleries(); }
     catch (e) { return { ok: false, error: e.message }; }
   });
+  h('daweb:tiers', async () => {
+    try { return await daweb.tiers(); }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+  h('daweb:tierCheck', (_e, { privateId, tierIds }) => daweb.tierCheck(privateId, tierIds));
 
   h('da:uploadReadiness', async () => {
     const sess = await daweb.status();
@@ -826,7 +831,10 @@ function registerIpc() {
     return powerBlockerId !== null;
   });
 
-  h('app:openExternal', (_e, url) => shell.openExternal(url));
+  h('app:openExternal', (_e, url) => {
+    if (!isHttpUrl(url)) throw new Error('only http(s) links can be opened');
+    return shell.openExternal(String(url));
+  });
   h('app:version', () => app.getVersion());
   h('app:runtime', (e) => {
     if (e.sender !== win?.webContents || e.senderFrame !== win.webContents.mainFrame) throw new Error('Untrusted app sender');

@@ -114,10 +114,52 @@ class DAWebClient {
     if (!Array.isArray(data.results)) return { ok: false, error: daError(data, resp.status) };
     return {
       ok: true,
-      galleries: data.results.map((g) => ({
-        id: String(g.folderId), name: g.name, special: g.specialType || null,
-      })),
+      galleries: data.results.map((g) => {
+        const pf = g.premiumFolderData || g.premium_folder_data || null;
+        return {
+          id: String(g.folderId), name: g.name, special: g.specialType || null,
+          premium: !!pf, premiumType: pf ? (pf.type || 'paid') : null,
+          price: pf ? (pf.dollarPrice ?? pf.dollar_price ?? null) : null,
+        };
+      }),
     };
+  }
+
+  /** The account's Subscription tiers; a tier is a deviation whose deviationId is what `tierids` takes. */
+  async tiers() {
+    const token = await this.csrf();
+    if (!this._username) await this.status();
+    const qs = new URLSearchParams({
+      username: this._username || '',
+      da_minor_version: DA_MINOR,
+      csrf_token: token,
+    });
+    const resp = await this._fetch(`${ORIGIN}/_puppy/dashared/tier/user/list?${qs}`, {
+      headers: this._headers(),
+    }, 45000);
+    const data = await resp.json().catch(() => ({}));
+    if (!Array.isArray(data.results)) return { ok: false, error: daError(data, resp.status) };
+    return {
+      ok: true,
+      tiers: data.results
+        .filter((t) => t && t.type === 'tier' && !t.isDeleted)
+        .map((t) => ({ id: String(t.deviationId), name: t.title || 'Tier', published: !!t.isPublished, url: t.url || null })),
+    };
+  }
+
+  /** Is this draft really inside every tier asked for? Publishing is refused unless it is. */
+  async tierCheck(privateId, tierIds = []) {
+    const want = (tierIds || []).map(String).filter(Boolean);
+    if (!want.length) return { ok: true, inTiers: [] };
+    let token;
+    try { token = await this.csrf(); } catch (e) { return { ok: false, error: e.message }; }
+    let info;
+    try { info = await this.draftInfo(privateId, token); } catch (e) { return { ok: false, error: e.message }; }
+    const have = new Set(info.inTiers || []);
+    const missing = want.filter((id) => !have.has(id));
+    return missing.length
+      ? { ok: false, inTiers: info.inTiers || [], error: `DeviantArt does not list this draft in the subscription tier (${missing.join(', ')}) — it was NOT submitted, so it stays private in Sta.sh` }
+      : { ok: true, inTiers: info.inTiers || [] };
   }
 
   /** Per-draft detail: which galleries it landed in, and its Sta.sh url. */
@@ -137,6 +179,7 @@ class DAWebClient {
       })),
       stashUrl: (data.deviation && (data.deviation.url || data.deviation.shortUrl)) || null,
       deviationId: data.deviation && data.deviation.deviationId,
+      inTiers: tierIdsOf(data.inTiers || (data.deviation && data.deviation.inTiers) || (data.formValues && data.formValues.tierids)),
     };
   }
 
@@ -148,7 +191,7 @@ class DAWebClient {
     filePath, title, description, tags = [],
     isMature = false, isAiGenerated = true, noai = false,
     galleryIds = null, allowComments = true, allowFreeDownload = true,
-    publish = false,
+    publish = false, tierIds = [],
   }) {
     if (!fs.existsSync(filePath)) {
       return { ok: false, stage: 'preflight', kind: 'permanent', error: `file missing: ${filePath}` };
@@ -183,7 +226,9 @@ class DAWebClient {
     let info = { galleries: [], stashUrl: null };
     try { info = await this.draftInfo(privateId, token); } catch { }
 
+    const tiers = (tierIds || []).map(String).filter(Boolean);
     let gids = (galleryIds && galleryIds.length) ? galleryIds.map(String) : null;
+    if (!gids && tiers.length) gids = [];
     if (!gids) {
       const featured = info.galleries.find((g) => g.special === 'featured') || info.galleries[0];
       gids = featured ? [featured.id] : [];
@@ -191,7 +236,7 @@ class DAWebClient {
 
     const meta = await this._writeMetadata({
       privateId, title, description, tags, isMature, isAiGenerated, noai,
-      galleryIds: gids, allowComments, allowFreeDownload,
+      galleryIds: gids, allowComments, allowFreeDownload, tierIds: tiers,
     }, token);
 
     if (!meta.ok) {
@@ -214,6 +259,12 @@ class DAWebClient {
       galleries: info.galleries,
       raw: meta.raw,
     };
+    if (tiers.length) {
+      out.tierIds = tiers;
+      const chk = await this.tierCheck(privateId, tiers);
+      out.inTiers = chk.inTiers || [];
+      if (!chk.ok) return { ...out, published: false, publishError: chk.error, publishKind: 'permanent' };
+    }
     if (!publish) return out;
 
     const pub = await this.publishDeviation(out.deviationId);
@@ -289,7 +340,7 @@ class DAWebClient {
   async _writeMetadata({
     privateId, title, description, tags = [],
     isMature = false, isAiGenerated = true, noai = false,
-    galleryIds = [], allowComments = true, allowFreeDownload = true,
+    galleryIds = [], allowComments = true, allowFreeDownload = true, tierIds = [],
   }, token, _isRetry = false) {
     const payload = {
       deviationid: String(privateId),
@@ -302,7 +353,7 @@ class DAWebClient {
       add_watermark: false,
       display_resolution: 0,
       tags: (tags || []).slice(0, 30),
-      tierids: '_empty',
+      tierids: (tierIds || []).length ? tierIds.map((x) => parseInt(String(x), 10)).filter((n) => Number.isFinite(n)) : '_empty',
       galleryids: (galleryIds || []).map(String),
       groups: '_empty',
       group_folders: '_empty',
@@ -333,7 +384,7 @@ class DAWebClient {
       if (fresh) {
         return this._writeMetadata({
           privateId, title, description, tags, isMature, isAiGenerated, noai,
-          galleryIds, allowComments, allowFreeDownload,
+          galleryIds, allowComments, allowFreeDownload, tierIds,
         }, fresh, true);
       }
     }
@@ -490,6 +541,12 @@ function classifyDaError(message, status) {
   return 'permanent';
 }
 
+function tierIdsOf(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((t) => (t && typeof t === 'object' ? (t.deviationId ?? t.value ?? t.id) : t))
+    .filter((x) => x != null && x !== '').map(String);
+}
+
 function mimeFor(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.png') return 'image/png';
@@ -501,4 +558,4 @@ function mimeFor(filePath) {
   return 'image/jpeg';
 }
 
-module.exports = { DAWebClient, buildEditorRaw, classifyDaError, daError };
+module.exports = { DAWebClient, buildEditorRaw, classifyDaError, daError, tierIdsOf };

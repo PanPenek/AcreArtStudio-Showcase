@@ -58,12 +58,17 @@
 
   function coreBox(s) {
     const core = (s.da && s.da.core) || {};
-    const galleries = ((s.da && s.da.galleryCache) || []).filter((g) => g.special !== 'featured');
+    const galleries = ((s.da && s.da.galleryCache) || []).filter((g) => g.special !== 'featured' && g.premium === true);
+    const tiers = (s.da && s.da.tierCache) || [];
     return `<div class="fld-row" style="flex-wrap:wrap">
         <label class="fld" style="min-width:150px"><span>DeviantArt Core</span>
           <select id="cg-core-plan">${CORE_PLANS.map((p) => `<option value="${esc(p)}" ${p === (core.enabled ? core.plan || 'Core Pro' : '') ? 'selected' : ''}>${p ? esc(p) : 'No Core (free account)'}</option>`).join('')}</select></label>
         <label class="fld" style="min-width:220px"><span>Premium gallery <em>(sold sets go here)</em></span>
-          <select id="cg-core-premium" ${core.enabled ? '' : 'disabled'}><option value="">— none —</option>${galleries.map((g) => `<option value="${esc(g.id)}" ${String(g.id) === String(core.premiumGalleryId || '') ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>
+          <select id="cg-core-premium" ${core.enabled ? '' : 'disabled'}><option value="">${galleries.length ? '— none —' : '— no Premium Gallery found —'}</option>${galleries.map((g) => `<option value="${esc(g.id)}" ${String(g.id) === String(core.premiumGalleryId || '') ? 'selected' : ''}>${esc(g.name)}${g.price != null ? ' · $' + esc(g.price) : ''}</option>`).join('')}</select></label>
+        <label class="fld" style="min-width:200px"><span>Subscription tier <em>(🔒 Subscribers posts go here)</em></span>
+          <select id="cg-core-tier"><option value="">${tiers.length ? '— none —' : '— no tier found —'}</option>${tiers.map((t) => `<option value="${esc(t.id)}" ${String(t.id) === String(core.tierId || '') ? 'selected' : ''}>${esc(t.name)}${t.published ? '' : ' (not published)'}</option>`).join('')}</select></label>
+        <button class="btn ghost" id="cg-core-refresh" style="align-self:flex-end" ${core.enabled ? '' : 'disabled'}
+          title="Read your gallery folders and Subscription tiers from DeviantArt again — press it after creating a Premium Gallery or a tier there">↻ Refresh</button>
       </div>
       <div class="hint">Without Core nothing changes. With Core: MP4 posts and the premium gallery unlock, and anything posted to the premium gallery gets DeviantArt's "Created using AI tools" label, which their terms require on items you sell. GIF posts work without Core.</div>`;
   }
@@ -133,9 +138,37 @@
     });
     const prem = $('#cg-core-premium', root);
     if (prem) prem.addEventListener('change', async () => {
-      const name = prem.selectedOptions[0] ? prem.selectedOptions[0].textContent : '';
+      const hit = ((State.settings.da && State.settings.da.galleryCache) || []).find((g) => String(g.id) === prem.value);
+      const name = hit ? hit.name : '';
       await patchSettings({ da: { core: { premiumGalleryId: prem.value, premiumGalleryName: prem.value ? name : '' } } });
       window.toast(prem.value ? `Premium gallery: ${name}` : 'No premium gallery', 'ok');
+    });
+    const tierSel = $('#cg-core-tier', root);
+    if (tierSel) tierSel.addEventListener('change', async () => {
+      const t = ((State.settings.da && State.settings.da.tierCache) || []).find((x) => String(x.id) === tierSel.value);
+      await patchSettings({ da: { core: { tierId: t ? String(t.id) : '', tierName: t ? t.name : '' } } });
+      window.toast(t ? `Subscription tier: ${t.name}` : 'No subscription tier', 'ok');
+      render();
+    });
+    const refresh = $('#cg-core-refresh', root);
+    if (refresh) refresh.addEventListener('click', async () => {
+      refresh.disabled = true; refresh.textContent = 'Reading…';
+      const res = await window.ala.daweb.galleries().catch((e) => ({ ok: false, error: e.message }));
+      if (!res.ok) { window.toast('Could not read galleries: ' + res.error, 'err'); render(); return; }
+      const prem = res.galleries.filter((g) => g.premium);
+      const core = (State.settings.da && State.settings.da.core) || {};
+      const keep = prem.some((g) => String(g.id) === String(core.premiumGalleryId || ''));
+      await patchSettings({ da: { galleryCache: res.galleries, ...(keep ? {} : { core: { premiumGalleryId: '', premiumGalleryName: '' } }) } });
+      const tr = await window.ala.daweb.tiers().catch((e) => ({ ok: false, error: e.message }));
+      let tierMsg = '';
+      if (tr.ok) {
+        const keepTier = tr.tiers.some((t) => String(t.id) === String(core.tierId || ''));
+        const only = !core.tierId && tr.tiers.length === 1 ? tr.tiers[0] : null;
+        await patchSettings({ da: { tierCache: tr.tiers, core: keepTier ? {} : only ? { tierId: only.id, tierName: only.name } : { tierId: '', tierName: '' } } });
+        tierMsg = tr.tiers.length ? ` · tiers: ${tr.tiers.map((t) => t.name).join(', ')}` : ' · no Subscription tier yet';
+      } else tierMsg = ` · could not read tiers: ${tr.error}`;
+      window.toast((prem.length ? `${prem.length} Premium Galler${prem.length > 1 ? 'ies' : 'y'} found: ${prem.map((g) => g.name).join(', ')}` : 'No Premium Gallery on your account yet — create one on DeviantArt (Gallery → Edit → New Gallery → Premium Gallery), add one deviation to it, then refresh.') + tierMsg, prem.length || (tr.ok && tr.tiers.length) ? 'ok' : 'err');
+      render();
     });
   }
 

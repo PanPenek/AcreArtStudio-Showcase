@@ -2485,6 +2485,11 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
       const s = State.settings;
       const method = s.da.uploadMethod || 'session';
       const isMature = card.mature !== undefined ? !!card.mature : !!s.metadata.mature;
+      if (opts && opts.subscription && method === 'api') {
+        card.status = 'approved';
+        State.persistLibrary();
+        throw new Error('Subscription-tier posts need the session upload route (Settings → DeviantArt → Upload method)');
+      }
       const description = withDescriptionFooter(card.metadata.description);
 
       let res;
@@ -2510,7 +2515,8 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
             media: opts ? opts.media : null,
             allowComments: s.da.allowComments !== false,
             allowFreeDownload: s.da.allowFreeDownload !== false,
-            publish: s.da.autoPublish !== false,
+            tierIds: opts && opts.subscription ? opts.tierIds : [],
+            publish: s.da.autoPublish !== false && !(opts && opts.premium),
           });
       } catch (e) {
         res = { ok: false, error: e.message, kind: 'transient' };
@@ -2605,6 +2611,19 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
     async publishCard(card) {
       if (!card.da || !card.da.deviationId) throw new Error('no deviation id on this card — delete the draft on DeviantArt and upload it again');
       if (card.da.published) return { ok: true, url: card.da.url, alreadyPublished: true };
+      if (card.premium && window.Growth) Growth.uploadOptions({ ...card, daMedia: null }, State.settings);
+      if (card.subscription && window.Growth) {
+        const o = Growth.uploadOptions({ ...card, daMedia: null }, State.settings);
+        const chk = await window.ala.daweb.tierCheck(card.da.itemid, o.tierIds)
+          .catch((e) => ({ ok: false, error: e.message }));
+        if (!chk.ok) {
+          card.da.publishError = { message: chk.error || 'tier not confirmed', kind: 'permanent', at: Date.now() };
+          card.updatedAt = Date.now();
+          State.persistLibrary();
+          log(`Submit refused for "${card.metadata?.title || card.id}": ${card.da.publishError.message}`, 'err');
+          return { ok: false, error: card.da.publishError.message, kind: 'permanent' };
+        }
+      }
 
       const res = await window.ala.daweb.publish(card.da.deviationId)
         .catch((e) => ({ ok: false, error: e.message, kind: 'transient' }));
@@ -2628,6 +2647,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
       const isMature = card.mature !== undefined ? !!card.mature : !!s.metadata.mature;
       let o = null;
       try { o = window.Growth ? Growth.uploadOptions({ ...card, daMedia: null }, s) : null; } catch { o = null; }
+      if (card.subscription && !(o && o.subscription)) throw new Error('the subscription tier for this card cannot be confirmed — ↻ Refresh tiers in Statistics → Channel growth first');
       const res = await window.ala.daweb.applyMetadata({
         privateId: card.da.itemid,
         title: card.metadata.title,
@@ -2639,6 +2659,7 @@ Respond ONLY with a JSON array of exactly ${count} objects, in image order:
         galleryIds: o ? o.galleryIds : (s.da.galleryIds || []),
         allowComments: s.da.allowComments !== false,
         allowFreeDownload: s.da.allowFreeDownload !== false,
+        tierIds: o && o.subscription ? o.tierIds : [],
       }).catch((e) => ({ ok: false, error: e.message, kind: 'transient' }));
 
       if (res.ok) {

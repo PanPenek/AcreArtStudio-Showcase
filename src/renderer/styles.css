@@ -1612,6 +1612,16 @@ details.fold > *:not(summary) { margin-top: 10px; }
 .cx-framing input[type="range"] { flex: 1 1 auto; min-width: 80px; accent-color: var(--accent); }
 .cx-sheets { display: flex; gap: 12px; flex-wrap: wrap; }
 .cx-sheet { width: 112px; }
+#cx-sheets { gap: 14px; }
+#cx-sheets .cx-sheet { width: 196px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-hover); display: flex; flex-direction: column; }
+#cx-sheets .cx-sheet img, #cx-sheets .cx-sheet .cx-empty { width: 100%; height: 260px; object-fit: contain; background: var(--bg); }
+#cx-sheets .cx-sheet .nm { font-size: 12.5px; margin: 6px 0 4px; display: flex; align-items: center; gap: 6px; }
+.cx-sheet-acts { display: flex; flex-direction: column; gap: 4px; margin-top: auto; }
+.cx-sheet-acts .cx-redraw { width: 100%; justify-content: center; }
+.cx-addref { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.cx-addref .hint { font-size: 11px; margin-right: 2px; }
+.cx-addref .btn.small { padding: 3px 7px; font-size: 11.5px; }
+.cx-refs.off img { opacity: .35; filter: grayscale(1); }
 .cx-sheet img, .cx-sheet .cx-empty {
   width: 112px; height: 152px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-strong);
   display: block; background: var(--bg-hover);
@@ -2242,6 +2252,7 @@ body.triage-open #toast-root { bottom: 76px; }
 .cx-place { width: 220px; }
 .cx-place img, .cx-place .cx-empty { width: 220px; height: 124px; }
 .cx-place textarea { width: 100%; font-size: 11.5px; margin: 2px 0 6px; resize: vertical; }
+.cx-sheet textarea.cx-sheetnote { width: 100%; box-sizing: border-box; font-size: 12px; line-height: 1.35; margin: 2px 0 6px; padding: 5px 7px; min-height: 44px; resize: vertical; }
 .cx-stage { position: relative; }
 #cx-canvas:focus { outline: none; }
 .cx-inline {

@@ -190,7 +190,7 @@
           : isEnd ? `<span class="vm-when">last frame · ${fmt(T)} s</span>`
             : `<label class="vm-when">at <input type="number" data-time="${i}" min="0.5" max="${T - 0.5}" step="0.5" value="${fmt(Number(f.at))}" /> s</label>`;
         return `<div class="vm-frame" data-i="${i}">
-          <div class="vm-thumb" data-act="zoom" data-i="${i}" title="Click to see it big"><img src="${esc(f.src.url)}" alt="" draggable="false" /><span class="vm-letter">${letter(i)}</span></div>
+          <div class="vm-thumb" data-act="zoom" data-i="${i}" title="Click to see it big"><img src="${esc(f.src.url)}" alt="" draggable="false" loading="lazy" decoding="async" /><span class="vm-letter">${letter(i)}</span></div>
           <div class="vm-name" title="${esc(f.src.name)}">${esc(f.src.name)}</div>
           ${when}
           <div class="vm-btns">
@@ -352,7 +352,7 @@
           <video controls preload="metadata" src="${esc(h.url)}"></video>
           <div class="vm-clip-body">
             <div class="vm-clip-tl">${esc(tl)} · ${fmt(h.seconds)} s</div>
-            <div class="vm-clip-pics">${h.frames.map((f, i) => `<img src="${esc(f.src.url)}" alt="${letter(i)}" title="${letter(i)}" />`).join('')}</div>
+            <div class="vm-clip-pics">${h.frames.map((f, i) => `<img src="${esc(f.src.url)}" alt="${letter(i)}" title="${letter(i)}" loading="lazy" decoding="async" />`).join('')}</div>
             <details><summary>prompt</summary><pre>${esc(h.prompt)}</pre></details>
             <div class="btn-row">
               <button class="btn small" data-act="reuse" title="Put these pictures, times and prompt back in the builder">↺ Reuse</button>

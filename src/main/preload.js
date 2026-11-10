@@ -127,6 +127,8 @@ contextBridge.exposeInMainWorld('ala', {
     deleteDraft: (deviationId) => invoke('daweb:deleteDraft', { deviationId }),
     listDrafts: () => invoke('daweb:listDrafts'),
     galleries: () => invoke('daweb:galleries'),
+    tiers: () => invoke('daweb:tiers'),
+    tierCheck: (privateId, tierIds) => invoke('daweb:tierCheck', { privateId, tierIds }),
   },
   pch: {
     hasGenerator: (wcId) => invoke('pch:hasGenerator', { wcId }),

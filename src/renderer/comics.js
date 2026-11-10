@@ -160,23 +160,28 @@ Respond ONLY with JSON:
 
   function sheetJob(project, m, form = 'before') {
     const style = project.artStyle || DEFAULT_STYLE;
+    const noteText = str(m.sheetNotes && m.sheetNotes[form], 600);
+    const note = noteText ? ` Important: ${endStop(noteText)}` : '';
     if (form === 'after' && m.after && m.sheet) {
       return {
-        prompt: `Edit <image1>. Change the character into this: ${m.after}. Keep the same full-body standing pose facing the viewer, the same framing, the same plain light-grey background and the same art style as <image1>.`,
+        prompt: `Edit <image1>. Change the character into this: ${m.after}.${note} Keep the same full-body standing pose facing the viewer, the same framing, the same plain light-grey background and the same art style as <image1>.`,
         refs: [{ fname: m.sheet.fname }], edit: true,
       };
     }
-    const refs = refsOf(m).slice(0, 2);
+    const refs = m.noRefs ? [] : refsOf(m).slice(0, 2);
     const body = 'Standing upright in a relaxed neutral pose facing the viewer, the whole body visible from head to feet. Plain flat light-grey background with nothing else in the picture.';
     if (refs.length) {
       const which = refs.length > 1 ? '<image1> and <image2>' : '<image1>';
       const look = lookAt(m, 'before');
+      const what = m.refFaceOnly
+        ? `the same face, eye colour, hair and skin tone as the character in ${refs.length > 1 ? 'those pictures' : 'that picture'} — but the body and clothes exactly as written here, not as in the picture${look ? `: ${look}` : ''}`
+        : `the same face, eye colour, hair, skin, body and outfit as the character in ${refs.length > 1 ? 'those pictures' : 'that picture'}${look ? ` (${look})` : ''}`;
       return {
-        prompt: `${style}. Character reference sheet of ${m.name}, redrawn from ${which}: the same face, eye colour, hair, skin, body and outfit as the character in ${refs.length > 1 ? 'those pictures' : 'that picture'}${look ? ` (${look})` : ''}. One single full-body view of ${m.name} alone. ${body} ${LIGHT}`,
+        prompt: `${style}. Character reference sheet of ${m.name}, redrawn from ${which}: ${what}.${note} One single full-body view of ${m.name} alone. ${body} ${LIGHT}`,
         refs: refs.map((r) => ({ fname: r.fname })), edit: false,
       };
     }
-    return { prompt: `${style}. Character reference of ${m.name}, one single full-body view: ${lookAt(m, 'before')}. ${body} ${LIGHT}`, refs: [], edit: false };
+    return { prompt: `${style}. Character reference of ${m.name}, one single full-body view: ${lookAt(m, 'before')}.${note} ${body} ${LIGHT}`, refs: [], edit: false };
   }
   const sheetPrompt = (project, m, form = 'before') => sheetJob(project, m, form).prompt;
 
@@ -650,7 +655,12 @@ Respond ONLY with JSON:
         for (const panel of p.panels) for (const t of panel.takes || []) if (t.fname) names.add(t.fname);
         for (const m of p.cast) for (const s of [m.sheet, m.afterSheet]) if (s && s.fname && s.source === 'generated') names.add(s.fname);
         for (const l of p.locations || []) if (l.plate && l.plate.fname) names.add(l.plate.fname);
-        for (const fname of names) await window.ala.files.deleteImage(fname).catch(() => {});
+        const others = JSON.stringify(this.data.projects.filter((x) => x.id !== id));
+        const onCards = new Set((State.library || []).map((c) => c.fname));
+        for (const fname of names) {
+          if (others.includes(fname) || onCards.has(fname)) continue;
+          await window.ala.files.deleteImage(fname).catch(() => {});
+        }
       }
       this.data.projects = this.data.projects.filter((x) => x.id !== id);
       this.persist();
@@ -811,7 +821,7 @@ Respond ONLY with JSON:
           waiting = true;
           continue;
         }
-        if (refsOf(m).length && !m.refAsSheet && m.sheet.source === 'generated' && !m.sheetCheck) {
+        if (refsOf(m).length && !m.noRefs && !m.refAsSheet && m.sheet.source === 'generated' && !m.sheetCheck) {
           this.setPhase(project, 'cast', `Checking ${m.name}'s sheet against the reference…`);
           const verdict = await this.checkSheet(project, m).catch((e) => { log(`could not check ${m.name}'s sheet (${e.message}) — keeping it.`, 'err'); return null; });
           m.sheetCheck = verdict || { identity: null, issue: 'not checked', at: Date.now() };
@@ -1256,9 +1266,21 @@ Respond ONLY with JSON:
       this.startWorker(project);
     },
 
-    rerollSheet(project, m, form = 'before') {
+    /**
+     * Reroll a cast sheet. `instruction` (the user's words, e.g. "bigger blue eyes") is kept per
+     * form and goes into every later draw of that sheet; '' clears it, leaving it out keeps the last.
+     * Redrawing the before sheet also drops the after sheet so it is redrawn from the new one.
+     */
+    rerollSheet(project, m, form = 'before', { instruction } = {}) {
+      if (instruction !== undefined) {
+        m.sheetNotes = { ...(m.sheetNotes || {}), [form]: str(instruction, 600) };
+        if (!m.sheetNotes[form]) delete m.sheetNotes[form];
+      }
       if (form === 'after') m.afterSheet = null;
-      else { m.sheet = null; m.refAsSheet = false; m.sheetCheck = null; m.sheetRedrawn = true; }
+      else {
+        m.sheet = null; m.refAsSheet = false; m.sheetCheck = null; m.sheetRedrawn = true;
+        if (m.after && !this.pendingJob(m.afterJobId)) { m.afterSheet = null; m.afterJobId = null; }
+      }
       if (!project.run.active) project.run = { ...project.run, active: true, error: null };
       this.queueSheet(project, m, form);
       this.startWorker(project);
@@ -1276,6 +1298,7 @@ Respond ONLY with JSON:
       if (!ref) throw new Error('no picture');
       m.refs = [...refsOf(m).filter((r) => r.fname !== ref.fname), ref].slice(-4);
       m.fromUser = true;
+      m.noRefs = false;
       this.persist();
       if (redraw && project.storyboarded) this.rerollSheet(project, m, 'before');
       return m;
@@ -1530,7 +1553,16 @@ Respond ONLY with JSON:
         });
         if (!existing.metadata || !existing.metadata.title) existing.metadata = meta;
         card = existing;
-        if (old && old !== saved.fname) window.ala.files.deleteImage(old).catch(() => {});
+        if (old && old !== saved.fname) {
+          for (const c of State.library) {
+            if (c === existing || c.fname !== old) continue;
+            const posted = (c.da && c.da.published) || (c.patreon && (c.patreon.posted || c.patreon.url)) || ['posted', 'published', 'drafted'].includes(c.status);
+            if (c.sellOf === existing.id && !posted) {
+              Object.assign(c, { fname: saved.fname, path: saved.path, url: saved.url, mime: existing.mime, width: existing.width, height: existing.height, updatedAt: Date.now() });
+            }
+          }
+          if (!State.library.some((c) => c.fname === old || (c.upscaled && c.upscaled.backup === old))) window.ala.files.deleteImage(old).catch(() => {});
+        }
       } else {
         card = {
           id: saved.id, jobId: null, theme: project.theme || '',

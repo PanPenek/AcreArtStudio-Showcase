@@ -140,7 +140,8 @@
   }
   // Argument keys that are numbers, booleans or lists whatever the model typed.
   const NUM_KEYS = new Set(['top', 'limit', 'count', 'webLimit', 'imageLimit', 'referenceCount', 'seconds', 'minutes', 'passThreshold', 'maxRetries', 'qcRetries', 'panels', 'panel', 'takes']);
-  const BOOL_KEYS = new Set(['fresh', 'first', 'original', 'skipQc', 'skipMetadata', 'cycleReferences', 'reroll', 'reletter', 'approveCast', 'sequence', 'plates']);
+  const BOOL_KEYS = new Set(['fresh', 'first', 'original', 'skipQc', 'skipMetadata', 'cycleReferences', 'reroll', 'reletter', 'approveCast', 'sequence', 'plates', 'dropReferences', 'faceOnly']);
+  const refsCount = (m) => ((m && m.refs) || []).filter((r) => r && r.fname).length;
   const LIST_KEYS = new Set(['ids', 'imageIds', 'referenceImages', 'order', 'cast']);
 
   /** `queueArt`, `Queue-Art`, `functions.queue_art`, ` queue art ` → `queue_art`. */
@@ -463,6 +464,11 @@
         return res.ok ? { ok: true, read: res.items.length } : { ok: false, error: res.error };
       },
     },
+    posting_strategy: {
+      args: '{"days": 14}',
+      what: 'What to post and WHEN, from the account\'s own DeviantArt numbers: comics vs singles (views in the first 12 h / 24 h, and views per hour of work), the best and weakest comics, story parts that went up too close together, and a suggested earliest time for every comic page waiting in Review. Re-reads DeviantArt first when the numbers are over an hour old (no tokens). Use it for "what should I post / when should I post part N / why did this batch do worse / is it worth making comics". These are SUGGESTIONS: give them once with the numbers, then do what he decides — never refuse or delay something because of them.',
+      run: (a) => Overseer.postingStrategy(a),
+    },
     learn: {
       args: '{}',
       what: 'Rebuild the playbook from the numbers. Unlike sync_stats this one DOES spend tokens — it asks a model to write down why the winners won. Worth it once a day, not once an hour.',
@@ -526,6 +532,11 @@
       args: '{"projectId": "latest if omitted", "panel": 2, "instruction": "what to change in that panel, in his words", "reroll": false, "reletter": false}',
       what: 'Change a comic that make_comic made: instruction = an EDIT of one panel\'s picture in words ("panel 3: add a red scarf"); reroll:true = draw that panel again from scratch; reletter:true (no panel) = rewrite all captions/dialogue from the pictures again. The page in Review is updated afterwards. Nothing is posted.',
       run: (a) => Overseer.reviseComic(a),
+    },
+    redraw_cast: {
+      args: '{"projectId": "latest if omitted", "character": "the cast member\'s name; may be left out when the comic has one character", "form": "before|after|both (default before; redrawing before also redraws the after sheet from it)", "instruction": "what should look different, in his words (hair, eyes, age of face, outfit, art style of the face…)", "references": ["his attachments a1 a2 (or library cardIds / research i1) the character should be drawn FROM"], "dropReferences": "true = draw from words only, no reference pictures (when he says it copies the reference)", "faceOnly": "true = the references lend face, hair and art only; body and clothes come from the words", "look": "optional: a new physical description replacing the current one", "outfit": "optional: new clothes"}',
+      what: 'Redraw a comic\'s CAST SHEET (the character reference every panel copies) with his instruction and/or reference pictures, keeping the same comic: same storyboard, panels, places, dialogue and projectId. Use for "redo the cast", "the character looks wrong", "make him look like this picture", "younger face / bigger eyes / blonde". His instruction is saved on the sheet and used on every later redraw. A comic waiting for cast approval waits again after the redraw; panels already drawn keep their pictures (reroll them with revise_comic if they should change). Never make_comic or update_comic for a cast fix. Nothing is posted.',
+      run: (a) => Overseer.redrawCast(a),
     },
     update_comic: {
       args: '{"projectId": "latest if omitted", "instruction": "what he wants changed or added for the WHOLE comic, in his words", "premise": "optional: a full replacement premise instead"}',
@@ -873,6 +884,7 @@
           approved: mine.filter((c) => c.status === 'approved').length,
         },
         stats: { lastSyncHoursAgo: syncAge, published: window.Insights ? Insights.scored().length : 0 },
+        partsWaiting: this.partsWaiting(),
         chatImages: this.chatImages().slice(-8).map((a) => ({ id: a.id, name: a.name, size: a.w && a.h ? `${a.w}x${a.h}` : null, sentAsPixels: a.sent })),
         recentResults: this.recentResults(),
         research: research ? {
@@ -2287,8 +2299,8 @@
         };
         State.library.unshift(card);
       } else {
-        if (card.video) window.ala.comfy.deleteVideo(card.video.fname).catch(() => {});
-        if (card.gif) window.ala.comfy.deleteGif(card.gif.fname).catch(() => {});
+        if (card.video && !State.mediaInUse('video', card.video.fname, card)) window.ala.comfy.deleteVideo(card.video.fname).catch(() => {});
+        if (card.gif && !State.mediaInUse('gif', card.gif.fname, card)) window.ala.comfy.deleteGif(card.gif.fname).catch(() => {});
       }
       card.video = { url: res.url, fname: res.fname, prompt: text, at: Date.now() };
       if (verdict) card.video.check = { ...verdict, attempts: attempts.length };
@@ -2509,8 +2521,118 @@
       try {
         const np = await Comics.nextPart(prev, { direction });
         log(`Overseer started ${np.title}`, 'ok');
-        return { ok: true, queued: 1, projectId: np.id, title: np.title, premise: np.premise.slice(0, 600), note: `${np.title} is being made (same characters, style and folders); the page lands in Review. Nothing is posted.` };
+        const tip = this.partTimingTip(np.title);
+        return { ok: true, queued: 1, projectId: np.id, title: np.title, premise: np.premise.slice(0, 600), note: `${np.title} is being made (same characters, style and folders); the page lands in Review. Nothing is posted.`, ...(tip ? { postingTip: tip } : {}) };
       } catch (e) { return { ok: false, error: e.message }; }
+    },
+
+    /** posting_strategy: fresh numbers first (a sync is page reads, no tokens), then Growth.postingPlan. */
+    async postingStrategy({ days = 14 } = {}) {
+      if (!window.Insights || !window.Growth || !Growth.postingPlan) return { error: 'the stats module is not loaded' };
+      let synced = null;
+      const age = Insights.perf && Insights.perf.lastSyncAt ? Date.now() - Insights.perf.lastSyncAt : Infinity;
+      if (age > 3_600_000) {
+        const limit = (State.settings.learn || {}).syncLimit || 50;
+        synced = await Promise.race([
+          Insights.sync({ withViews: true, quiet: true, limit }).then((r) => (r && r.ok ? { ok: true } : { ok: false, error: (r && r.error) || 'sync failed' })),
+          new Promise((r) => setTimeout(() => r({ ok: false, error: 'the sync took over 2 minutes; it keeps running in the background' }), 120_000)),
+        ]).catch((e) => ({ ok: false, error: e.message }));
+      }
+      const g = Growth.cfg();
+      const plan = Growth.postingPlan({
+        deviations: (Insights.perf && Insights.perf.deviations) || [], library: State.library || [],
+        lastSyncAt: Insights.perf && Insights.perf.lastSyncAt, days: clamp(Number(days) || 14, 1, 90),
+        minutesPerComic: Number(g.minutesPerComic) || 20, minutesPerSingle: Number(g.minutesPerSingle) || 4,
+        partGapHours: Number(g.partGapHours) || 20,
+      });
+      return {
+        ...(synced ? { synced: synced.ok, ...(synced.ok ? {} : { syncError: synced.error }) } : { synced: 'fresh enough (under 1 h)' }),
+        ...plan,
+        howToUse: 'Suggest the plan in plain words with these numbers (what to post next, when each waiting part should go up). The minutes of work per post are estimates (settings.json growth.minutesPerComic / minutesPerSingle, default 20 / 4), not measured — say so. He decides; if he wants to post now, help him post now.',
+      };
+    },
+
+    /** Story parts in Review/approved with the suggested earliest post time, chained part after part. */
+    partsWaiting() {
+      if (!window.Growth || !Growth.postingPlan || !window.Insights || !Insights.perf) return [];
+      try {
+        const g = Growth.cfg();
+        const plan = Growth.postingPlan({ deviations: Insights.perf.deviations || [], library: State.library || [], lastSyncAt: Insights.perf.lastSyncAt, days: 30, partGapHours: Number(g.partGapHours) || 20 });
+        return plan.waitingComics.filter((w) => w.suggestedEarliestPost).slice(0, 4).map((w) => ({
+          id: w.id, title: w.title,
+          suggestion: w.readyNow ? 'fine to post now' : `post from ${new Date(w.suggestedEarliestPost).toLocaleString()} (his call)`,
+        }));
+      } catch { return []; }
+    },
+
+    /** One advice sentence about when a story part should go up; null when it is not a part or nothing is live yet. */
+    partTimingTip(title) {
+      if (!window.Growth || !Growth.partOf || !window.Insights) return null;
+      const pt = Growth.partOf(title);
+      if (!pt) return null;
+      const gap = Number(Growth.cfg().partGapHours) || 20;
+      const premium = Growth.premiumDeviationIds(State.library || []);
+      const live = ((Insights.perf && Insights.perf.deviations) || [])
+        .filter((d) => !d.isDeleted && d.publishedAt && !premium.has(String(d.deviationId)) && (Growth.partOf(d.title) || {}).base === pt.base);
+      if (!live.length) return null;
+      const last = Math.max(...live.map((d) => d.publishedAt));
+      const at = new Date(Math.max(Date.now(), last + gap * 3_600_000));
+      return `Suggestion: post it ${at <= new Date(Date.now() + 60_000) ? 'any time now' : `from ${at.toLocaleString()} on`} — about ${gap} h after the last live part, so each part gets its own first day. His call.`;
+    },
+
+    /** redraw_cast: redraw one character's sheet in the SAME comic (Comics.rerollSheet). */
+    async redrawCast({ projectId = '', character = '', form = 'before', instruction = '', references = [], dropReferences = false, faceOnly = false, look = '', outfit = '' } = {}) {
+      if (this._abort) return cancelled();
+      const project = this.comicProject(projectId);
+      if (!project) return { ok: false, error: 'there is no comic yet — make_comic first' };
+      if (!project.storyboarded || !(project.cast || []).length) return { ok: false, error: 'this comic has no storyboard/cast yet — wait for comic_status to show the cast, or use update_comic to change the premise' };
+      const want = String(character || '').trim().toLowerCase();
+      const m = want ? project.cast.find((c) => c.name.toLowerCase() === want) || project.cast.find((c) => c.name.toLowerCase().includes(want) || want.includes(c.name.toLowerCase()))
+        : project.cast.length === 1 ? project.cast[0] : null;
+      if (!m) return { ok: false, error: `name the character: ${project.cast.map((c) => c.name).join(', ')}` };
+      const noGen = this.generationRefusal();
+      if (noGen) return noGen;
+      const which = ['before', 'after', 'both'].includes(form) ? form : 'before';
+      if (which !== 'before' && !m.after) return { ok: false, error: `${m.name} has no "after" form in this comic` };
+      const ids = (Array.isArray(references) ? references : references ? [references] : []).map(String).flatMap((s) => s.split(/[\s,;]+/)).filter(Boolean).slice(0, 4);
+      const added = [];
+      const warnings = [];
+      for (const id of ids) {
+        try {
+          const pic = await this.comicPicture(id, '', m.name);
+          Comics.addReference(project, m, pic);
+          added.push(pic.source);
+        } catch (e) {
+          if (e.fatal) return { ok: false, error: e.message, ...(e.extra || {}) };
+          warnings.push(`${id}: ${e.message}`);
+        }
+      }
+      if (ids.length && !added.length) return { ok: false, error: `no usable reference picture (${warnings.join('; ')})` };
+      if (dropReferences === true || dropReferences === 'true') m.noRefs = true;
+      else if (added.length) m.noRefs = false;
+      if (faceOnly === true || faceOnly === 'true') m.refFaceOnly = true;
+      if (String(look || '').trim()) m.look = String(look).trim().slice(0, 400);
+      if (String(outfit || '').trim()) m.outfit = String(outfit).trim().slice(0, 300);
+      const text = String(instruction || '').trim();
+      try {
+        if (Comics.isRunning(project) === false && project.run) project.run.error = null;
+        project.autoSend = true;
+        if (which === 'after') Comics.rerollSheet(project, m, 'after', text ? { instruction: text } : {});
+        else {
+          Comics.rerollSheet(project, m, 'before', text ? { instruction: text } : {});
+          if (which === 'both' && text) m.sheetNotes = { ...(m.sheetNotes || {}), after: (m.sheetNotes || {}).after || text.slice(0, 600) };
+        }
+        if (project.approveCast) project.castApproved = false;
+        Comics.persist();
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
+      log(`Overseer is redrawing ${m.name}'s cast sheet${text ? `: ${text.slice(0, 80)}` : ''}.`, 'ok');
+      return {
+        ok: true, queued: 1, projectId: project.id, character: m.name, form: which, fromWordsOnly: !!m.noRefs || !refsCount(m),
+        references: added.length ? added : undefined, warnings: warnings.length ? warnings : undefined,
+        note: `${m.name}'s ${which === 'after' ? '"after" ' : ''}sheet is being drawn again${added.length ? ' from the new reference picture(s)' : ''}${text ? ' with his instruction' : ''}${which !== 'after' && m.after ? '; the "after" sheet follows from the new one' : ''}. Same comic, same storyboard.${project.approveCast ? ' It waits for his approval in the Comics tab again before panels.' : ''} Panels already drawn keep their pictures. Nothing is posted.`,
+      };
     },
 
     stopComic({ projectId = '' } = {}) {
@@ -2994,6 +3116,9 @@
       if (room <= 0) return { ok: false, refused: `the daily upload cap (${g.maxPerDay}) is already used up — ${sentToday} sent today` };
 
       const cards = this.byIds(ids);
+      const postingAdvice = window.Growth && Growth.partSpacingNotes && window.Insights
+        ? Growth.partSpacingNotes(cards, (Insights.perf && Insights.perf.deviations) || [], { partGapHours: Number(Growth.cfg().partGapHours) || 20, library: State.library || [] })
+        : [];
       const sent = [];
       const published = [];
       const drafts = [];
@@ -3027,6 +3152,7 @@
       State.persistLibrary();
       const stopped = this._abort || epoch !== this._cancelEpoch;
       return { ok: !stopped && !blocked.length && !drafts.some((d) => d.publishError), sent, published, drafts, blocked,
+        ...(postingAdvice.length ? { postingAdvice } : {}),
         ...(stopped ? { cancelled: true, note: 'Stopped; an upload already in flight cannot be recalled.' } : {}) };
     },
 
@@ -3110,6 +3236,8 @@ COMICS
 COMICS
 - "Make a comic / manga page / webtoon / comic strip about …" → make_comic with his premise in his words (panels and format if he says). CHARACTERS: when he attached them, cast ["Name: a1"]. When the comic stars EXISTING characters (anime, game, film, a named OC from the library), get pictures first: web_research kind="character" per character, then pass 1-2 clean images of each — one person alone, full body or clear face, no group shots, no text/collage — as cast ["Mira: i2 i5", "Bolt: i1"] with researchId; a character with no good picture is drawn from words. A detailed premise (a chapter adaptation) should spell out each character's look and the panel beats. A step-by-step change shown in one framing → sequence:true (lettering:"float" for hand-lettered words). Ask nothing he already decided; default pageStyle classic. One call runs the whole thing in the background; report the projectId and that the page lands in Review — never claim panels or dialogue you have not been told about. Never build a comic with queue_art.
 - A correction or addition for the whole comic after make_comic ("forgot to add: it happens at night", "make it 4 panels", "no hats") → update_comic with his words as instruction — ONE call, even while it is still rendering; never a second make_comic. "Stop the comic" → stop_comic. "Part 2 / next part / continue the comic" → next_comic_part.
+- When and what to post ("when should Part 4 go up", "why did today do worse", "are comics worth it") → posting_strategy; it syncs first and returns suggestions with his numbers (partsWaiting in the state block has the timing for pages in Review). Say the suggestion once; if he wants it posted now, post it now.
+- "Redo the cast / the character looks wrong / make him look like this (a1)" → redraw_cast with his words as instruction and his attachments as references — same comic, never make_comic. "It copies the reference" → redraw_cast dropReferences:true (words only) with a look of your own design. Write a sheet instruction as a short positive description, not a list of bans.
 - "Change panel 3 …" → revise_comic with panel and his instruction; "redo panel 2" → reroll:true; "rewrite the dialogue" → reletter:true. "How is the comic going?" → comic_status.
 
 ${unattended

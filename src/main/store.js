@@ -64,7 +64,8 @@ const DEFAULT_SETTINGS = {
     allowComments: true,
     allowFreeDownload: true,
     autoPublish: true,
-    core: { enabled: false, plan: '', premiumGalleryId: '', premiumGalleryName: '' },
+    core: { enabled: false, plan: '', premiumGalleryId: '', premiumGalleryName: '', tierId: '', tierName: '' },
+    tierCache: [],
   },
   growth: {
     username: '',

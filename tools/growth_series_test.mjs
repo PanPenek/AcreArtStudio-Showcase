@@ -130,7 +130,7 @@ section('growth: format, upload options');
   threw = '';
   try { G.uploadOptions({ premium: true }, s); } catch (e) { threw = e.message; }
   ok('premium without Core refuses', /premium gallery/.test(threw), threw);
-  const core = { ...s, da: { ...s.da, core: { enabled: true, premiumGalleryId: '777' } } };
+  const core = { ...s, da: { ...s.da, core: { enabled: true, premiumGalleryId: '777' }, galleryCache: [{ id: '777', name: 'Paid', premium: true }] } };
   o = G.uploadOptions({ premium: true, galleryIds: ['96682504'], aiLabel: false }, core);
   ok('premium goes to the premium gallery only', o.galleryIds.join() === '777');
   ok('premium is always labelled AI (sold item), even against the card', o.isAiGenerated === true);

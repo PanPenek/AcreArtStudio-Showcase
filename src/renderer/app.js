@@ -1161,7 +1161,7 @@
       <div class="drafts-list">
         ${rows.map((c) => `
           <div class="draft-row" data-pick="${c.id}" style="cursor:pointer">
-            <img src="${c.url}" alt="" />
+            <img src="${c.url}" alt="" loading="lazy" decoding="async" />
             <div class="d-info">
               <div class="d-title">${esc(c.metadata?.title || c.fname)}</div>
               <div class="hint">${c.qc ? `QC ${c.qc.score}/10` : 'not inspected'}${c.theme ? ' · ' + esc(c.theme) : ''}${c.promptSource ? ' · ' + esc(c.promptSource) : ''}</div>
@@ -2584,11 +2584,13 @@
       if (!hit.length) return toast('No discarded cards.', 'ok');
       if (!confirm(`Permanently delete ${hit.length} discarded card(s) AND their image files from disk?`
         + '\n\nThis cannot be undone — it is the "empty the bin" step.')) return;
+      const kept = State.library.filter((c) => c.status !== 'discarded');
+      const inUse = new Set(kept.flatMap((c) => [c.fname, c.upscaled && c.upscaled.backup].filter(Boolean)));
       for (const c of hit) {
-        window.ala.files.deleteImage(c.fname).catch(() => {});
-        if (c.upscaled && c.upscaled.backup) window.ala.files.deleteImage(c.upscaled.backup).catch(() => {});
+        if (!inUse.has(c.fname)) window.ala.files.deleteImage(c.fname).catch(() => {});
+        if (c.upscaled && c.upscaled.backup && !inUse.has(c.upscaled.backup)) window.ala.files.deleteImage(c.upscaled.backup).catch(() => {});
       }
-      State.library = State.library.filter((c) => c.status !== 'discarded');
+      State.library = kept;
       State.persistLibrary();
       State.addLog(`Deleted ${hit.length} discarded card(s) and their files.`, 'ok');
       toast(`Deleted ${hit.length} card(s) and their files.`, 'ok');
@@ -3045,6 +3047,22 @@
               ${c.video?.fname ? `<button class="pm-opt ${dm === 'video' ? 'on' : ''} ${core ? '' : 'off'}" data-da-media="video" ${editable ? '' : 'disabled'} title="${core ? 'The MP4 clip' : 'MP4 uploads need DeviantArt Core — turn it on in Statistics → Channel growth once you have it'}"><span>▶ MP4</span></button>` : ''}
             </div>`;
           })() : ''}
+          ${dests.includes('deviantart') ? (() => {
+            const core = State.settings.da?.core || {};
+            const gal = core.premiumGalleryName || '';
+            return `<div class="pat-media da-sell" role="group" aria-label="Free or paid on DeviantArt" style="margin-top:6px">
+              <span class="hint" style="align-self:center;margin-right:6px">On DeviantArt</span>
+              <button class="pm-opt ${c.premium || c.subscription ? '' : 'on'}" data-da-sell="free" ${editable ? '' : 'disabled'} title="A normal public deviation"><span>🌐 Free</span></button>
+              <button class="pm-opt ${c.premium ? 'on' : ''} ${core.enabled && core.premiumGalleryId ? '' : 'off'}" data-da-sell="sell" ${editable ? '' : 'disabled'}
+                title="${esc(core.enabled && core.premiumGalleryId ? `Goes into your Premium Gallery "${gal}" — people pay once to see it. Uploaded as a Sta.sh draft (Created using AI tools); you press Submit.` : 'Create a Premium Gallery on DeviantArt first, then pick it in Statistics → Channel growth')}"><span>💰 Sell</span>${c.premium && gal ? `<span class="pm-size">${esc(gal)}</span>` : ''}</button>
+              <button class="pm-opt ${c.subscription && !c.premium ? 'on' : ''} ${core.tierId ? '' : 'off'}" data-da-sell="tier" ${editable ? '' : 'disabled'}
+                title="${esc(core.tierId ? `Goes behind your Subscription tier "${core.tierName || core.tierId}" — only subscribers see it. Created using AI tools; Acre checks DeviantArt put it in the tier before it submits.` : 'Create a Subscription tier on DeviantArt, then pick it in Statistics → Channel growth → DeviantArt Core')}"><span>🔒 Subscribers</span>${c.subscription && core.tierName ? `<span class="pm-size">${esc(core.tierName)}</span>` : ''}</button>
+            </div>`;
+          })() : dests.includes('patreon') && editable ? `<div style="margin-top:6px"><button class="btn ghost small" data-act="dasell"
+              title="Make a second card of this page that sells in your DeviantArt Premium Gallery (Patreon keeps this one)">💰 Also sell on DeviantArt</button>
+              <button class="btn ghost small" data-act="datier"
+              title="Make a second card of this page for your DeviantArt Subscription tier (Patreon keeps this one)">🔒 Also post for DA subscribers</button></div>` : ''}
+          ${c.sellOf ? `<div class="hint">${c.subscription ? 'Subscriber copy of a Patreon card — only your DeviantArt subscribers see it.' : 'Sold copy of a Patreon card — only buyers of the Premium Gallery see it.'}</div>` : ''}
           ${c.pixiv?.illustId ? `<div class="hint ok px-only">on pixiv since ${esc(fmtTime(c.pixiv.at))} —
             <a href="#" data-open="${esc(c.pixiv.url || '')}">open ↗</a>
             ${ ''}
@@ -3189,9 +3207,39 @@
         toast(`DeviantArt will get the ${want === 'image' ? 'still picture' : want === 'gif' ? 'animated GIF' : 'MP4'}.`, 'ok');
       }));
 
+    el.querySelectorAll('[data-da-sell]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        const core = State.settings.da?.core || {};
+        if (btn.dataset.daSell === 'sell') {
+          if (!(core.enabled && core.premiumGalleryId)) return toast('Create a Premium Gallery on DeviantArt first, then pick it in Statistics → Channel growth (↻ Refresh if it is not listed).', 'err');
+          card.premium = true; delete card.subscription;
+        } else if (btn.dataset.daSell === 'tier') {
+          if (!core.tierId) return toast('Pick your Subscription tier first: Statistics → Channel growth → DeviantArt Core → ↻ Refresh, then choose the tier.', 'err');
+          card.subscription = true; delete card.premium;
+        } else { delete card.premium; delete card.subscription; }
+        card.updatedAt = Date.now();
+        State.persistLibrary();
+        if (typeof renderReview === 'function') renderReview();
+        toast(card.premium ? `Will sell in "${core.premiumGalleryName}" — uploads as a Sta.sh draft, you press Submit.`
+          : card.subscription ? `Subscribers only: goes behind "${core.tierName}" when uploaded.` : 'Free public post.', 'ok');
+      }));
+
     el.querySelectorAll('[data-act]').forEach((btn) =>
       btn.addEventListener('click', async () => {
         const act = btn.dataset.act;
+        if (act === 'datier' || act === 'dasell') {
+          const copy = Growth.sellCardFrom(card);
+          if (act === 'datier') { delete copy.premium; copy.subscription = true; }
+          State.library.unshift(copy);
+          State.persistLibrary();
+          State.addLog(`"${card.metadata?.title || card.fname}": made a DeviantArt ${act === 'datier' ? 'Subscription-tier' : 'Premium'} copy.`);
+          if (typeof renderReview === 'function') renderReview();
+          const core = State.settings.da?.core || {};
+          toast(act === 'datier'
+            ? (core.tierId ? `Subscriber copy added to Review (→ ${core.tierName}).` : 'Subscriber copy added — pick your tier in Statistics → Channel growth → DeviantArt Core before uploading it.')
+            : (core.premiumGalleryId ? `Sell copy added to Review (→ ${core.premiumGalleryName}).` : 'Sell copy added — pick your Premium Gallery in Statistics → Channel growth before uploading it.'), 'ok');
+          return;
+        }
         if (act === 'approve') {
           const bare = !Pipeline.hasMetadata(card);
           card.status = 'approved'; card.updatedAt = Date.now(); State.persistLibrary();
@@ -3352,10 +3400,11 @@
           if (!confirm('Delete this card AND its image file from disk?\n\nThis cannot be undone. (Reject or Discard keeps the file.)')) return;
           State.library = State.library.filter((c) => c.id !== id);
           State.persistLibrary();
-          window.ala.files.deleteImage(card.fname).catch(() => {});
-          if (card.upscaled && card.upscaled.backup) window.ala.files.deleteImage(card.upscaled.backup).catch(() => {});
-          if (card.video) window.ala.comfy.deleteVideo(card.video.fname).catch(() => {});
-          if (card.gif) window.ala.comfy.deleteGif(card.gif.fname).catch(() => {});
+          const usedBy = (f) => State.library.some((c) => c.fname === f || (c.upscaled && c.upscaled.backup === f));
+          if (!usedBy(card.fname)) window.ala.files.deleteImage(card.fname).catch(() => {});
+          if (card.upscaled && card.upscaled.backup && !usedBy(card.upscaled.backup)) window.ala.files.deleteImage(card.upscaled.backup).catch(() => {});
+          if (card.video && !State.mediaInUse('video', card.video.fname, card)) window.ala.comfy.deleteVideo(card.video.fname).catch(() => {});
+          if (card.gif && !State.mediaInUse('gif', card.gif.fname, card)) window.ala.comfy.deleteGif(card.gif.fname).catch(() => {});
         }
       }));
 
@@ -3490,8 +3539,8 @@
         if (!base64) base64 = await window.ala.files.readImageBase64(card.fname);
         const d = new window.ComfyDriver(State.settings);
         const res = await d.convertToVideo({ base64, mime, prompt, workflow: pickedWorkflow(), seconds: seconds(), log: (m) => State.addLog(m, 'comfy') });
-        if (card.video) window.ala.comfy.deleteVideo(card.video.fname).catch(() => {});
-        if (card.gif) window.ala.comfy.deleteGif(card.gif.fname).catch(() => {});
+        if (card.video && !State.mediaInUse('video', card.video.fname, card)) window.ala.comfy.deleteVideo(card.video.fname).catch(() => {});
+        if (card.gif && !State.mediaInUse('gif', card.gif.fname, card)) window.ala.comfy.deleteGif(card.gif.fname).catch(() => {});
         card.video = { url: res.url, fname: res.fname, prompt, at: Date.now() };
         card.gif = res.gif ? { url: res.gif.url, fname: res.gif.fname, size: res.gif.size, at: Date.now() } : null;
         card.updatedAt = Date.now();
@@ -3523,7 +3572,7 @@
         if (gif.fname !== card.gif?.fname) window.ala.comfy.deleteGif(gif.fname).catch(() => {});
         return;
       }
-      if (card.gif && card.gif.fname !== gif.fname) window.ala.comfy.deleteGif(card.gif.fname).catch(() => {});
+      if (card.gif && card.gif.fname !== gif.fname && !State.mediaInUse('gif', card.gif.fname, card)) window.ala.comfy.deleteGif(card.gif.fname).catch(() => {});
       card.gif = { url: gif.url, fname: gif.fname, size: gif.size, at: Date.now() };
       card.updatedAt = Date.now();
       State.persistLibrary();
@@ -3981,7 +4030,7 @@
       const autoLeft = Pipeline.pendingSites(c).filter((s) => !(s === 'pixiv' && human)).length;
       return `
       <div class="draft-row" data-id="${c.id}">
-        <img src="${c.url}" alt="" />
+        <img src="${c.url}" alt="" loading="lazy" decoding="async" />
         <div class="d-info">
           <div class="d-title">${esc(c.metadata?.title || 'Untitled')}</div>
           <div class="d-sites">${siteChips(c)}</div>
@@ -4014,7 +4063,7 @@
     $('#rejected-count').textContent = rejected.length ? `· ${rejected.length}` : '';
     $('#drafts-rejected').innerHTML = rejected.map((c) => `
       <div class="draft-row" data-id="${c.id}">
-        <img src="${c.url}" alt="" />
+        <img src="${c.url}" alt="" loading="lazy" decoding="async" />
         <div class="d-info">
           <div class="d-title">${esc(c.metadata?.title || 'Untitled')}</div>
           <div class="d-sub">DeviantArt said: <b>${esc(c.uploadError?.message || c.error || 'rejected')}</b></div>
@@ -4034,7 +4083,7 @@
         : (c.pixiv ? 'posted ' + fmtTime(c.pixiv.at) : '');
       return `
       <div class="draft-row" data-id="${c.id}">
-        <img src="${c.url}" alt="" />
+        <img src="${c.url}" alt="" loading="lazy" decoding="async" />
         <div class="d-info">
           <div class="d-title">${live ? '<b class="ok">Published</b> · ' : ''}${esc(c.metadata?.title || 'Untitled')}</div>
           <div class="d-sites">${siteChips(c)}</div>
@@ -5190,7 +5239,7 @@
     wrap.innerHTML = queue.length
       ? queue.map((c) => `
         <button class="pat-q ${c.id === patCurrent ? 'on' : ''}" data-pat-id="${c.id}" title="${esc(c.metadata?.title || c.fname)}">
-          <img src="${c.url}" alt="" />
+          <img src="${c.url}" alt="" loading="lazy" decoding="async" />
           <span class="pq-title">${esc(c.metadata?.title || c.fname)}</span>
         </button>`).join('')
       : `<div class="hint">Approve a Patreon-bound card in Review and it appears here.</div>`;

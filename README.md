@@ -9,6 +9,8 @@ You describe what you want to make. The app writes the prompts, generates the im
 checks every picture for mistakes, writes titles and descriptions, and lines everything
 up for you to approve. Nothing goes out without you saying so.
 
+*Version 3.9.6: posting strategy, DeviantArt Premium Gallery and Subscription tiers, comic cast redraw, stability fixes.*
+
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 ![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![Electron 37](https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white)
@@ -89,6 +91,11 @@ falls back to the next one on its own.
 - 📈 **Channel growth**: daily watchers and profile views read from public profile pages, the pace towards a watcher goal, which kind of post (picture, comic page, GIF, MP4) gets the most views, and tags learned from your own best-viewed posts
 - 🧑‍🏫 **Teach it**: write your own rules ("always…", "never…") that the app follows and that no automatic rebuild can overwrite
 
+**Posting advice**
+- 📅 **Posting strategy** (Overseer tool `posting_strategy`) reads your own DeviantArt numbers and suggests what to post next and when: comics vs singles, views per hour of work, story parts that went up too close together
+- 💰 **DeviantArt Premium Gallery and 🔒 Subscription tier**: choose per card whether a page is free, sold in a Premium Gallery, or for subscribers; the pickers only offer folders and tiers DeviantArt itself lists, and a tier page is only submitted once DeviantArt confirms it is in the tier
+- 🎭 **Redraw a cast sheet** in a comic with your own words or reference pictures, without touching the storyboard
+
 **Running on its own (optional)**
 - 🌙 **Auto mode** runs rounds unattended, with hourly limits and stop conditions, and parks every result in Review for you
 - 🗣️ **Overseer in agent mode** wakes on a schedule, looks at what happened and works towards a goal you wrote down
@@ -158,7 +165,7 @@ flowchart LR
 ### Windows (the easy way)
 
 1. Click **Code → Download ZIP** on this page and unzip it anywhere, or
-   `git clone https://github.com/PanPenek/AcreArtStudio-Showcase.git`
+   `git clone https://github.com/PanPenek/AcreArtStudio.git`
 2. Double-click **`install.bat`**. It installs Node.js if needed and the app's single
    dependency (Electron, about 100 MB), then asks a few questions about AI models (below).
 3. Double-click **`start.bat`**.
@@ -218,8 +225,8 @@ time with `npm run setup`; `npm run setup -- --dry-run` shows the plan without d
 ### macOS / Linux
 
 ```bash
-git clone https://github.com/PanPenek/AcreArtStudio-Showcase.git
-cd AcreArtStudio-Showcase
+git clone https://github.com/PanPenek/AcreArtStudio.git
+cd AcreArtStudio
 ./install.sh
 npm start
 ```
@@ -353,7 +360,7 @@ app can't reach the file system. A full module-by-module map is in
 ## Project layout
 
 ```
-AcreArtStudio-Showcase/
+AcreArtStudio/
 ├── install.bat / install.sh     one-click setup (Node.js + Electron, then tools/setup.mjs)
 ├── start.bat                    launch on Windows
 ├── package.json                 npm start · npm test
@@ -410,8 +417,9 @@ pictures on FLUX.3 Image Klein graphs, the Image Edit workflow menu and library 
 Overseer references. The feature suites next to it cover the image shape setting, text-only
 workflows and the reference fallback, edit routing, named references, the Overseer engine bar
 with `set_model`, the fallback video model, Overseer chats, the one-comic-per-turn guard, comic frames and
-crop, changing and continuing comics, the picture count, bypassed workflow nodes, the Edit model, and
-Channel growth with Series.
+crop, changing and continuing comics, the picture count, bypassed workflow nodes, the Edit model,
+Channel growth with Series, DeviantArt tier uploads and posting-strategy helpers, the main-process
+launch and link handlers, and redrawing a comic's cast sheet.
 
 Every JavaScript file also passes `node --check`.
 
